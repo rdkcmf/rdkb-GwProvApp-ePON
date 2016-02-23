@@ -8,8 +8,7 @@ PIDFile=/tmp/.gwprovepon.pid
 ExecStart=/usr/ccsp/gw_prov_epon
 ExecStop=/bin/kill -HUP $(/bin/cat /tmp/gwprovepon.pid)
 ExecStop=/bin/rm /tmp/.gwprovepon.pid
-#Restart=always
-StandardOutput=syslog+console
+StandardOutput=syslog
 
 [Install]
 WantedBy=multi-user.target
