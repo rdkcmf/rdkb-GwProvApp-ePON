@@ -734,6 +734,9 @@ static int GWPEpon_Init()
     char thread_name[THREAD_NAME_LEN];
     fprintf(stderr,"Entering into %s\n",__FUNCTION__);
 
+    /* Start up utopia services */
+    system("/etc/utopia/utopia_init.sh");
+
     if (GWPEpon_Register_sysevent() == false)
     {
         fprintf(stderr,"%s:%d GWPEpon_Register_sysevent failed\n",__FUNCTION__, __LINE__);    
@@ -742,7 +745,7 @@ static int GWPEpon_Init()
     else 
     {
         fprintf(stderr,"%s:%d GWPEpon_Register_sysevent Successful\n",__FUNCTION__, __LINE__);
-    
+
         thread_status = pthread_create(&sysevent_tid, NULL, GWPEpon_sysevent_handler, NULL);
         if (thread_status == 0)
         {
