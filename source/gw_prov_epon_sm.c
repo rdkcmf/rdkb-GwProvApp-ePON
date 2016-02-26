@@ -51,6 +51,16 @@ static int sysevent_fd_gs;
 static token_t sysevent_token_gs;
 static pthread_t sysevent_tid;
 
+#define INFO  0
+#define WARNING  1
+#define ERROR 2
+
+#ifdef _RDKLOG
+#define GWPROVEPONLOG(x, ...) { if((x)==(INFO)){CcspTraceInfo((__VA_ARGS__));}else if((x)==(WARNING)){CcspTraceWarning((__VA_ARGS__));}else if((x)==(ERROR)){CcspTraceError((__VA_ARGS__));} }
+#else
+#define GWPROVEPONLOG(x, ...) {fprintf(stderr, "GwProvEponLog<%s:%d> ", __FUNCTION__, __LINE__);fprintf(stderr, __VA_ARGS__);}
+#endif
+
 #define IF_WANBRIDGE "wanbridge"
 #define _DEBUG 1
 #define THREAD_NAME_LEN 16 //length is restricted to 16 characters, including the terminating null byte
@@ -107,14 +117,13 @@ static int netlink_read_event (int sockint)
             return ret;
 
         /* Anything else is an error */
-        fprintf(stderr, "\nread_netlink: Error recvmsg: %d\n", status);
-        perror ("\nread_netlink: Error: ");
+        GWPROVEPONLOG(ERROR, "read_netlink: Error recvmsg: %d\n", status);
         return status;
     }
 
     if (status == 0)
     {
-        fprintf(stderr, "\nread_netlink: EOF\n");
+        GWPROVEPONLOG(INFO, "read_netlink: EOF\n");
     }
 
     // We need to handle more than one message per 'recvmsg'
@@ -128,7 +137,7 @@ static int netlink_read_event (int sockint)
         // Message is some kind of error 
         if (h->nlmsg_type == NLMSG_ERROR)
         {
-            fprintf(stderr, "\nread_netlink: Message is an error - decode TBD\n");
+            GWPROVEPONLOG(ERROR, "read_netlink: Message is an error - decode TBD\n");
             return -1;        // Error
         }
 
@@ -147,7 +156,6 @@ static int netlink_read_event (int sockint)
 
         if (ifa->ifa_index == if_index)
         {
-            //sysevent_set(sysevent_fd_gs, sysevent_token_gs, "epon_if-status", buf, 0);      	
             switch(h->nlmsg_type)
             {
                 case RTM_NEWLINK:
@@ -173,7 +181,7 @@ static int netlink_read_event (int sockint)
                 break;
             }
 
-            fprintf(stderr,"\n%s interface status modified with %s", IF_WANBRIDGE, netLinkStatus);
+            GWPROVEPONLOG(WARNING, "%s interface status modified with %s\n", IF_WANBRIDGE, netLinkStatus);
         }
     }
 
@@ -200,7 +208,7 @@ static int netlink_read_event (int sockint)
 */
 static void *GWPEpon_netlink_handler(void *data)
 {
-    fprintf(stderr,"\nEntering into %s\n", __FUNCTION__);
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__)
 
     fd_set rfds, wfds;
     struct timeval tv;
@@ -210,7 +218,7 @@ static void *GWPEpon_netlink_handler(void *data)
     int nl_socket = socket (AF_NETLINK, SOCK_RAW, NETLINK_ROUTE);
     if (nl_socket < 0)
     {
-        fprintf(stderr,"\nNetlink socket open error!");
+        GWPROVEPONLOG(ERROR, "Netlink socket open error!")
     }
     else
     {
@@ -222,7 +230,7 @@ static void *GWPEpon_netlink_handler(void *data)
 
         if (bind (nl_socket, (struct sockaddr *) &addr, sizeof (addr)) < 0)
         {
-          fprintf(stderr,"\nNetlink Socket bind failed!");
+            GWPROVEPONLOG(ERROR, "Netlink Socket bind failed!\n");
         }
         else
         {
@@ -237,10 +245,10 @@ static void *GWPEpon_netlink_handler(void *data)
 
                 retval = select (FD_SETSIZE, &rfds, NULL, NULL, &tv);
                 if (retval == -1)
-                    fprintf(stderr,"\nNetlink select() error!");
+                    GWPROVEPONLOG(ERROR, "Netlink select() error!\n");
                 else if (retval)
                 {
-                    fprintf(stderr,"\nNetlink event recieved");
+                    GWPROVEPONLOG(WARNING, "Netlink event recieved\n");
                     netlink_read_event (nl_socket);
                 }
                 //else
@@ -249,7 +257,7 @@ static void *GWPEpon_netlink_handler(void *data)
         } 
     }   
 
-    fprintf(stderr,"\nExiting from %s\n", __FUNCTION__);
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
 }
 #endif //#ifdef HAVE_NETLINK_SUPPORT
 
@@ -261,42 +269,42 @@ static void *GWPEpon_netlink_handler(void *data)
 **************************************************************************/
 static void SetProvisioningStatus(EPON_IpProvStatus status)
 {
-    fprintf(stderr,"Entering into %s\n",__FUNCTION__);
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__)
 
     const char * ip_status[] = { "None", "Ipv6", "NoIpv6", "Ipv4", "NoIpv4"};
     unsigned  char value[20]; //use unsigned char all over
     value[0] = '\0' ;
 
-    unsigned char prov_status = 0x00;
+    int prov_status = 0;
     prov_status = GWPEpon_SyseventGetInt("prov_status");
 
     switch(status)
     {
         case EPON_OPER_IPV6_UP:
-            prov_status |= 0x01;
+            prov_status |= 0x00000001;
         break;
 
         case EPON_OPER_IPV6_DOWN:
-            prov_status &= ~(0x01);
+            prov_status &= ~(0x00000001);
         break;
 
         case EPON_OPER_IPV4_UP:
-            prov_status |= 0x02;
+            prov_status |= 0x00000002;
         break;
 
         case EPON_OPER_IPV4_DOWN:
-            prov_status &= ~(0x02);
+            prov_status &= ~(0x00000002);
         break;
 
         case EPON_OPER_NONE:
-            prov_status = 0x00;
+            prov_status = 0x00000000;
         break;
 		
         default:
         break;
     }
 	
-    if (prov_status & 0x01) 
+    if (prov_status & 0x00000001) 
     {
         strcat(value, ip_status[EPON_OPER_IPV6_UP]);
     }
@@ -305,7 +313,7 @@ static void SetProvisioningStatus(EPON_IpProvStatus status)
         strcat(value, ip_status[EPON_OPER_IPV6_DOWN]);
     }
 	
-    if (prov_status & 0x02) 
+    if (prov_status & 0x00000002) 
     {
         strcat(value, ip_status[EPON_OPER_IPV4_UP]);
     }
@@ -316,11 +324,11 @@ static void SetProvisioningStatus(EPON_IpProvStatus status)
 
     GWPEpon_SysCfgSetInt("factory_mode", 0); // We have been provisioned
     GWPEpon_SyseventSetInt("prov_status",prov_status);
-    fprintf(stderr,"%s: epon_prov_status=%s %d\n",__FUNCTION__, value, prov_status);
+    GWPROVEPONLOG(INFO, "epon_prov_status=%s %d\n",value, prov_status)
     //TODO:To be added in EPON gateway provisiong data model
     sysevent_set(sysevent_fd_gs, sysevent_token_gs, "epon_prov_status", value, sizeof(value));
-	
-    fprintf(stderr,"Exiting from %s\n",__FUNCTION__);
+
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
 }
 
 /**************************************************************************/
@@ -330,11 +338,12 @@ static void SetProvisioningStatus(EPON_IpProvStatus status)
  *  \return 0
 **************************************************************************/
 static int GWPEpon_ProcessIfDown(void)
-{    
-    fprintf(stderr,"Entering into%s\n",__FUNCTION__);
-    GWPEpon_StopIPProvisioning();
-    fprintf(stderr,"Exiting from %s\n",__FUNCTION__);
+{
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__)
 
+    GWPEpon_StopIPProvisioning();
+
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
     return 0;
 }
 
@@ -346,9 +355,11 @@ static int GWPEpon_ProcessIfDown(void)
 **************************************************************************/
 static int GWPEpon_ProcessIfUp(void)
 {
-    fprintf(stderr,"Entering into %s\n",__FUNCTION__);
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__)
+
     GWPEpon_StartIPProvisioning();
-    fprintf(stderr,"Exiting from %s\n",__FUNCTION__);
+
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
     return 0;
 }
 
@@ -360,9 +371,11 @@ static int GWPEpon_ProcessIfUp(void)
 **************************************************************************/
 static int GWPEpon_ProcessIpv4Down(void)
 {
-    fprintf(stderr,"Entering into %s\n",__FUNCTION__);
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__)
+
     SetProvisioningStatus(EPON_OPER_IPV4_DOWN);
-    fprintf(stderr,"Exiting from %s\n",__FUNCTION__);
+
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
     return 0;
 }
 
@@ -374,9 +387,11 @@ static int GWPEpon_ProcessIpv4Down(void)
 **************************************************************************/
 static int GWPEpon_ProcessIpv4Up(void)
 {
-    fprintf(stderr,"Entering into %s\n",__FUNCTION__);
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__)
+
     SetProvisioningStatus(EPON_OPER_IPV4_UP);
-    fprintf(stderr,"Exiting from %s\n",__FUNCTION__);
+
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
     return 0;
 }
 
@@ -388,9 +403,11 @@ static int GWPEpon_ProcessIpv4Up(void)
 **************************************************************************/
 static int GWPEpon_ProcessIpv6Down(void)
 {
-    fprintf(stderr,"Entering into %s\n",__FUNCTION__);
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__)
+
     SetProvisioningStatus(EPON_OPER_IPV6_DOWN);
-    fprintf(stderr,"Exiting from %s\n",__FUNCTION__);
+
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
     return 0;
 }
 
@@ -402,9 +419,11 @@ static int GWPEpon_ProcessIpv6Down(void)
 **************************************************************************/
 static int GWPEpon_ProcessIpv6Up(void)
 {
-    fprintf(stderr,"Entering into %s\n",__FUNCTION__);
-    SetProvisioningStatus(EPON_OPER_IPV6_UP);	
-    fprintf(stderr,"Exiting from %s\n",__FUNCTION__);
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__)
+
+    SetProvisioningStatus(EPON_OPER_IPV6_UP);
+
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
     return 0;
 }
 
@@ -419,13 +438,13 @@ int GWPEpon_SyseventGetInt(const char *name)
    unsigned char out_value[20];
    int outbufsz = sizeof(out_value);
 
-   if (!sysevent_get(sysevent_fd_gs, sysevent_token_gs, name, out_value,1))
+   if (!sysevent_get(sysevent_fd_gs, sysevent_token_gs, name, out_value,outbufsz))
    {
       return atoi(out_value);
    }
    else
    {
-      fprintf(stderr,"%s failed \n",__FUNCTION__);
+      GWPROVEPONLOG(INFO, "sysevent_get failed\n")
       return -1;
    }
 }
@@ -462,7 +481,7 @@ static int GWPEpon_SysCfgGetInt(const char *name)
    }
    else
    {
-      fprintf(stderr,"%s failed \n",__FUNCTION__);
+      GWPROVEPONLOG(INFO, "syscfg_get failed\n")
       return -1;
    }
 }
@@ -490,12 +509,14 @@ static int GWPEpon_SysCfgSetInt(const char *name, int int_value)
  **************************************************************************/
 static void GWPEpon_StopIPProvisioning()
 {
-    fprintf(stderr,"Entering into %s\n",__FUNCTION__);	
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__)
+
     system("systemctl stop dibbler.service");
     system("rm /tmp/.start_ipv4"); 
     system("systemctl stop udhcp.service");
     SetProvisioningStatus(EPON_OPER_NONE);
-    fprintf(stderr,"Exiting from %s\n",__FUNCTION__);  
+
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
 }
 /**************************************************************************/
 /*! \fn static void GWPEpon_StartIPProvisioning
@@ -505,12 +526,13 @@ static void GWPEpon_StopIPProvisioning()
  **************************************************************************/
 static void GWPEpon_StartIPProvisioning()
 {
-    fprintf(stderr,"Entering into %s\n",__FUNCTION__);
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__)
+
     factory_mode = GWPEpon_SysCfgGetInt("factory_mode");
     routerIpModeOverride = GWPEpon_SysCfgGetInt("router_ip_mode_override");
 
-    unsigned char prov_status = GWPEpon_SyseventGetInt("prov_status");	
-    fprintf(stderr,"%s prov_status=%d routerIpModeOverride=%d\n",__FUNCTION__,prov_status, routerIpModeOverride);	
+    int prov_status = GWPEpon_SyseventGetInt("prov_status");	
+    GWPROVEPONLOG(INFO, "prov_status=%d routerIpModeOverride=%d\n",prov_status, routerIpModeOverride)
     if (factory_mode) //First IP Initialization (Factory reset or Factory unit)
     {  
         routerIpModeOverride = IpProvModeHonor;
@@ -557,7 +579,7 @@ static void GWPEpon_StartIPProvisioning()
             }
         }
     }
-   fprintf(stderr,"Exiting from %s\n",__FUNCTION__);   
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
 }
 
 /**************************************************************************/
@@ -568,7 +590,8 @@ static void GWPEpon_StartIPProvisioning()
 **************************************************************************/
 static void *GWPEpon_sysevent_handler(void *data)
 {
-    fprintf(stderr,"Entering into %s\n",__FUNCTION__);
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__)
+
     async_id_t epon_ifstatus_asyncid;
     async_id_t ipv4_status_asyncid;
     async_id_t ipv6_status_asyncid;
@@ -585,8 +608,6 @@ static void *GWPEpon_sysevent_handler(void *data)
     sysevent_setnotification(sysevent_fd, sysevent_token, "ipv6-status",  &ipv6_status_asyncid);
 
     sysevent_set_options(sysevent_fd_gs, sysevent_token, "epon_prov_status", TUPLE_FLAG_EVENT);
-    sysevent_setnotification(sysevent_fd, sysevent_token, "epon_prov_status",  &ipv6_status_asyncid);
-	
     sysevent_set_options(sysevent_fd_gs, sysevent_token, "prov_status", TUPLE_FLAG_EVENT);
 
     
@@ -609,11 +630,11 @@ static void *GWPEpon_sysevent_handler(void *data)
 
         if (err)
         {
-           fprintf(stderr,"%s-ERR: %d\n", __func__, err);
+           GWPROVEPONLOG(ERROR, "sysevent_getnotification failed with error: %d\n", err)
         }
         else
         {
-            fprintf(stderr,"%s: received notification event %s \n", __func__, name);
+            GWPROVEPONLOG(WARNING, "received notification event %s\n", name)
 
             if (strcmp(name, "epon_ifstatus")==0)
             {
@@ -650,37 +671,38 @@ static void *GWPEpon_sysevent_handler(void *data)
             }
             else
             {
-               fprintf(stderr,"%s: undefined event %s \n", __func__, name);
+               GWPROVEPONLOG(WARNING, "undefined event %s \n",name)
             }
 			
             // committing syscfg values
-            fprintf(stderr,"%s committing syscfg values\n",__FUNCTION__);
+            GWPROVEPONLOG(INFO, "committing syscfg values\n")
             syscfg_commit();
         }
     }
 
-    fprintf(stderr,"Exiting from %s\n",__FUNCTION__);
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
 }
 
 static void GWPEpon_SetDefaults()
 {
     char buf[10];
-    fprintf(stderr,"Entering into %s\n",__FUNCTION__);
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__)
+
     if (GWPEpon_SysCfgGetInt("factory_mode") < 0)
     {
-        fprintf(stderr,"%s setting default factory mode\n",__FUNCTION__);
+        GWPROVEPONLOG(INFO, "setting default factory mode\n")
         GWPEpon_SysCfgSetInt("factory_mode", 0);   
     }
 
     if (GWPEpon_SysCfgGetInt("router_ip_mode_override") < 0)
     {
-        fprintf(stderr,"%s setting default router ip override mode\n",__FUNCTION__);
+        GWPROVEPONLOG(INFO, "setting default router ip override mode\n")
         GWPEpon_SysCfgSetInt("router_ip_mode_override", 2);   
     }
    
     if (GWPEpon_SyseventGetInt ("prov_status") < 0)
     {
-        fprintf(stderr,"%s setting default prov_status\n",__FUNCTION__);
+        GWPROVEPONLOG(INFO, "setting default prov_status\n")
         GWPEpon_SyseventSetInt("prov_status",0);
     }
 
@@ -689,41 +711,41 @@ static void GWPEpon_SetDefaults()
     {
         sysevent_set(sysevent_fd_gs, sysevent_token_gs, "epon_ifname", "wanbridge", 0);
     }
-   fprintf(stderr,"Exiting from %s\n",__FUNCTION__);
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
 }
 
 static bool GWPEpon_Register_sysevent()
 {
     bool status = true;
-    fprintf(stderr,"Entering into %s\n",__FUNCTION__);
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__)
     
     sysevent_fd = sysevent_open("127.0.0.1", SE_SERVER_WELL_KNOWN_PORT, SE_VERSION, "gw_prov_epon", &sysevent_token);
     if (sysevent_fd < 0)
     {
-        fprintf(stderr,"%s:%d gw_prov_epon failed to register with sysevent daemon\n",__FUNCTION__, __LINE__);
+        GWPROVEPONLOG(ERROR, "gw_prov_epon failed to register with sysevent daemon\n");
         status = false;
     }
     else
     {  
-        fprintf(stderr,"%s:%d gw_prov_epon registered with sysevent daemon successfully\n",__FUNCTION__, __LINE__);
+        GWPROVEPONLOG(INFO, "gw_prov_epon registered with sysevent daemon successfully\n")
     }
 
-   //Make another connection for gets/sets
+    //Make another connection for gets/sets
     sysevent_fd_gs = sysevent_open("127.0.0.1", SE_SERVER_WELL_KNOWN_PORT, SE_VERSION, "gw_prov_epon-gs", &sysevent_token_gs);
     if (sysevent_fd_gs < 0)
     {
-        fprintf(stderr,"%s:%d gw_prov_epon-gs failed to register with sysevent daemon\n",__FUNCTION__, __LINE__);
+        GWPROVEPONLOG(ERROR, "gw_prov_epon-gs failed to register with sysevent daemon\n")
         status = false;
     }
     else
     {
-        fprintf(stderr,"%s:%d gw_prov_epon-gs registered with sysevent daemon successfully\n",__FUNCTION__, __LINE__);
+        GWPROVEPONLOG(INFO, "gw_prov_epon-gs registered with sysevent daemon successfully\n")
     }
 
     if (status != false)
        GWPEpon_SetDefaults();
-	
-    fprintf(stderr,"Exiting from %s\n",__FUNCTION__);
+
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
     return status;
 }
 
@@ -732,76 +754,73 @@ static int GWPEpon_Init()
     int status = 0;
     int thread_status = 0;
     char thread_name[THREAD_NAME_LEN];
-    fprintf(stderr,"Entering into %s\n",__FUNCTION__);
-
-    /* Start up utopia services */
-    system("/etc/utopia/utopia_init.sh");
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__)
 
     if (GWPEpon_Register_sysevent() == false)
     {
-        fprintf(stderr,"%s:%d GWPEpon_Register_sysevent failed\n",__FUNCTION__, __LINE__);    
+        GWPROVEPONLOG(ERROR, "GWPEpon_Register_sysevent failed\n")
         status = -1;
     }
     else 
     {
-        fprintf(stderr,"%s:%d GWPEpon_Register_sysevent Successful\n",__FUNCTION__, __LINE__);
-
+        GWPROVEPONLOG(INFO, "GWPEpon_Register_sysevent Successful\n")
+    
         thread_status = pthread_create(&sysevent_tid, NULL, GWPEpon_sysevent_handler, NULL);
         if (thread_status == 0)
         {
-            fprintf(stderr,"GWPEpon_sysevent_handler thread created successfully\n");
+            GWPROVEPONLOG(INFO, "GWPEpon_sysevent_handler thread created successfully\n");
 
             memset( thread_name, '\0', sizeof(char) * THREAD_NAME_LEN );
             strcpy( thread_name, "GWPEponsysevent");
 
             if (pthread_setname_np(sysevent_tid, thread_name) == 0)
-                fprintf(stderr,"GWPEpon_sysevent_handler thread name '%s' set successfully\n", thread_name);
+                GWPROVEPONLOG(INFO, "GWPEpon_sysevent_handler thread name %s set successfully\n", thread_name)
             else
-                fprintf(stderr,"'%s' error occured while setting GWPEpon_sysevent_handler thread name\n", strerror(errno));
+                GWPROVEPONLOG(ERROR, "%s error occured while setting GWPEpon_sysevent_handler thread name\n", strerror(errno))
         }
         else
         {
-            fprintf(stderr, "'%s' error occured while creating GWPEpon_sysevent_handler thread\n", strerror(errno)); 
+            GWPROVEPONLOG(ERROR, "%s error occured while creating GWPEpon_sysevent_handler thread\n", strerror(errno))
             status = -1;
         }
 
 #ifdef HAVE_NETLINK_SUPPORT
-        fprintf(stderr,"Entering HAVE_NETLINK_SUPPORT");
+        GWPROVEPONLOG(INFO, "Entering HAVE_NETLINK_SUPPORT")
         thread_status = 0;
         thread_status = pthread_create(&netlink_tid, NULL, GWPEpon_netlink_handler, NULL);
         if (thread_status == 0)
         {
-            fprintf(stderr,"GWPEpon_netlink_handler thread created successfully\n");
+            GWPROVEPONLOG(INFO, "GWPEpon_netlink_handler thread created successfully\n");
 
             memset( thread_name, '\0', sizeof(char) * THREAD_NAME_LEN );
             strcpy( thread_name, "GWPEponnetlink" );
 
             if (pthread_setname_np(netlink_tid, thread_name) == 0)
-                fprintf(stderr,"GWPEpon_netlink_handler thread name '%s' set successfully\n", thread_name);
+                GWPROVEPONLOG(INFO, "GWPEpon_netlink_handler thread name '%s' set successfully\n", thread_name)
             else
-                fprintf(stderr,"'%s' error occured while setting GWPEpon_netlink_handler thread name\n", strerror(errno));
+                GWPROVEPONLOG(ERROR, "%s error occured while setting GWPEpon_netlink_handler thread name\n", strerror(errno))
         }
         else
-            fprintf(stderr, "%s occured while creating GWPEpon_netlink_handler thread\n", strerror(errno)); 
+            GWPROVEPONLOG(ERROR, "%s occured while creating GWPEpon_netlink_handler thread\n", strerror(errno)) 
 #endif
     }
-    fprintf(stderr,"Exiting from %s\n",__FUNCTION__);
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
     return status;
 }
 
 static bool checkIfAlreadyRunning(const char* name)
 {
-    fprintf(stderr,"Entering into %s\n",__FUNCTION__);
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__)
     bool status = true;
 	
     FILE *fp = fopen("/tmp/.gwprovepon.pid", "r"); 	
     if (fp == NULL) 
     {
-        fprintf(stderr,"%s: file /tmp/.gwprovepon.pid doesn't exist\n",__FUNCTION__);
+        GWPROVEPONLOG(ERROR, "File /tmp/.gwprovepon.pid doesn't exist\n")
         FILE *pfp = fopen("/tmp/.gwprovepon.pid", "w"); 			
         if (pfp == NULL) 
         {
-            fprintf(stderr,"%s: error in creating file /tmp/.gwprovepon.pid\n",__FUNCTION__);
+            GWPROVEPONLOG(ERROR, "Error in creating file /tmp/.gwprovepon.pid\n")
         }
         else
         {
@@ -814,32 +833,32 @@ static bool checkIfAlreadyRunning(const char* name)
     else
     {
         fclose(fp);
-    }	
-    fprintf(stderr,"Exiting from %s\n",__FUNCTION__);
+    }
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
     return status;
 }
 
 static void daemonize(void) 
 {
-    fprintf(stderr,"Entering into %s\n",__FUNCTION__);
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__)
     int fd;
     switch (fork()) {
     case 0:
-      	 fprintf(stderr,"In child pid=%d\n",getpid());
+      	GWPROVEPONLOG(ERROR, "In child pid=%d\n", getpid())
         break;
     case -1:
     	// Error
-    	fprintf(stderr,"Error daemonizing (fork)! %d - %s\n", errno, strerror(errno));
+    	GWPROVEPONLOG(ERROR, "Error daemonizing (fork)! %d - %s\n", errno, strerror(errno))
     	exit(0);
     	break;
     default:
-     	fprintf(stderr,"In parent exiting\n");
+     	GWPROVEPONLOG(ERROR, "In parent exiting\n")
     	_exit(0);
     }
 
     //create new session and process group
     if (setsid() < 0) {
-    	fprintf(stderr,"Error demonizing (setsid)! %d - %s\n", errno, strerror(errno));
+        GWPROVEPONLOG(ERROR, "Error demonizing (setsid)! %d - %s\n", errno, strerror(errno))
     	exit(0);
     }    
 
@@ -877,48 +896,49 @@ int main(int argc, char *argv[])
     int status = 0;
     const int max_retries = 6;
     int retry = 0;
-    fprintf(stderr,"Started gw_prov_epon\n");
+
+    GWPROVEPONLOG(INFO, "Started gw_prov_epon\n")
 
     daemonize();
 
     if (checkIfAlreadyRunning(argv[0]) == true)
     {
-        fprintf(stderr,"%s Process %s Already running\n",__FUNCTION__,argv[0]);
+        GWPROVEPONLOG(ERROR, "Process %s already running\n", argv[0])
         status = 1;
     }
     else
     {    
         while((syscfg_init() != 0) && (retry++ < max_retries))
         {
-            fprintf(stderr,"syscfg init failed. Retry <%d> ...\n", retry);
+            GWPROVEPONLOG(ERROR, "syscfg init failed. Retry<%d> ...\n", retry)
             sleep(5);
         }
 
         if (retry < max_retries)
         {
-            fprintf(stderr,"syscfg init successful\n");
+            GWPROVEPONLOG(INFO, "syscfg init successful\n")
 
             if (GWPEpon_Init() != 0)
             {
-                fprintf(stderr,"%s: GWPEpon Initialization failed\n",__FUNCTION__);
+                GWPROVEPONLOG(ERROR, "GWPEpon Initialization failed\n")
                 status = 1;
             }
             else
             {
-                fprintf(stderr,"%s: GWPEpon Initialization complete\n",__FUNCTION__);
+                GWPROVEPONLOG(INFO, "GwProvEpon initialization completed\n")
 
                 //wait for sysevent_tid thread to terminate
                 pthread_join(sysevent_tid, NULL);
                 
-                fprintf(stderr,"%s: sysevent_tid thread terminated\n",__FUNCTION__);
+                GWPROVEPONLOG(INFO,"sysevent_tid thread terminated\n")
             }
         }
         else
         {
-            fprintf(stderr,"syscfg init failed permanently\n");
+            GWPROVEPONLOG(ERROR, "syscfg init failed permanently\n")
             status = 1;
         }
-        fprintf(stderr,"gw_prov_epon app terminated\n");
+	GWPROVEPONLOG(INFO, "gw_prov_epon app terminated\n")
     }
     return status;
 }
