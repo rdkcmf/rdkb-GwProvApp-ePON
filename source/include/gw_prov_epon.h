@@ -6,6 +6,9 @@
 #ifndef _GW_GWPROV_EPON_H_
 #define _GW_GWPROV_EPON_H_
 	
+#ifdef FEATURE_SUPPORT_RDKLOG
+char *pComponentName = NULL;
+#endif
 
 typedef enum
 {

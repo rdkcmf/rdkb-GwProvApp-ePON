@@ -7,6 +7,9 @@
 /**************************************************************************/
 /*      INCLUDES:                                                         */
 /**************************************************************************/
+#ifdef FEATURE_SUPPORT_RDKLOG
+#undef FEATURE_SUPPORT_RDKLOG
+#endif
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -55,7 +58,10 @@ static pthread_t sysevent_tid;
 #define WARNING  1
 #define ERROR 2
 
-#ifdef _RDKLOG
+#ifdef FEATURE_SUPPORT_RDKLOG
+#include "ccsp_trace.h"
+const char compName[25]="LOG.RDK.GWEPON";
+#define DEBUG_INI_NAME  "/etc/debug.ini"
 #define GWPROVEPONLOG(x, ...) { if((x)==(INFO)){CcspTraceInfo((__VA_ARGS__));}else if((x)==(WARNING)){CcspTraceWarning((__VA_ARGS__));}else if((x)==(ERROR)){CcspTraceError((__VA_ARGS__));} }
 #else
 #define GWPROVEPONLOG(x, ...) {fprintf(stderr, "GwProvEponLog<%s:%d> ", __FUNCTION__, __LINE__);fprintf(stderr, __VA_ARGS__);}
@@ -623,6 +629,7 @@ static void *GWPEpon_sysevent_handler(void *data)
         {
            err = sysevent_get(sysevent_fd_gs, sysevent_token_gs, "epon_ifstatus", val, vallen);
            firstBoot = 0;
+           strcpy(val, "up");
            strcpy(name,"epon_ifstatus");
         }
         else
@@ -711,13 +718,28 @@ static void GWPEpon_SetDefaults()
     {
         sysevent_set(sysevent_fd_gs, sysevent_token_gs, "epon_ifname", "wanbridge", 0);
     }
+    sysevent_get(sysevent_fd_gs, sysevent_token_gs, "lan_ifstatus", buf, sizeof(buf));
+    if (buf[0] != '\0')
+    {
+        sysevent_set(sysevent_fd_gs, sysevent_token_gs, "lan_ifstatus", "up", 0);
+    }
+    sysevent_get(sysevent_fd_gs, sysevent_token_gs, "epon_ifstatus", buf, sizeof(buf));
+    if (buf[0] != '\0')
+    {
+        sysevent_set(sysevent_fd_gs, sysevent_token_gs, "epon_ifstatus", "up", 0);
+    }
     GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
 }
 
 static bool GWPEpon_Register_sysevent()
 {
-    bool status = true;
+    bool status = false;
+    const int max_retries = 6;
+    int retry = 0;
     GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__)
+
+     do
+    	{
     
     sysevent_fd = sysevent_open("127.0.0.1", SE_SERVER_WELL_KNOWN_PORT, SE_VERSION, "gw_prov_epon", &sysevent_token);
     if (sysevent_fd < 0)
@@ -727,25 +749,33 @@ static bool GWPEpon_Register_sysevent()
     }
     else
     {  
-        GWPROVEPONLOG(INFO, "gw_prov_epon registered with sysevent daemon successfully\n")
+        GWPROVEPONLOG(INFO, "gw_prov_epon registered with sysevent daemon successfully\n");
+        status = true;
     }
 
     //Make another connection for gets/sets
     sysevent_fd_gs = sysevent_open("127.0.0.1", SE_SERVER_WELL_KNOWN_PORT, SE_VERSION, "gw_prov_epon-gs", &sysevent_token_gs);
     if (sysevent_fd_gs < 0)
     {
-        GWPROVEPONLOG(ERROR, "gw_prov_epon-gs failed to register with sysevent daemon\n")
+        GWPROVEPONLOG(ERROR, "gw_prov_epon-gs failed to register with sysevent daemon\n");
         status = false;
     }
     else
     {
-        GWPROVEPONLOG(INFO, "gw_prov_epon-gs registered with sysevent daemon successfully\n")
+        GWPROVEPONLOG(INFO, "gw_prov_epon-gs registered with sysevent daemon successfully\n");
+        status = true;
     }
+	if(status == false) {
+		system("/usr/bin/syseventd");
+            sleep(5);
+		}
+    	}while((status == false) && (retry++ < max_retries));
+
 
     if (status != false)
        GWPEpon_SetDefaults();
 
-    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
     return status;
 }
 
@@ -898,6 +928,11 @@ int main(int argc, char *argv[])
     int retry = 0;
 
     GWPROVEPONLOG(INFO, "Started gw_prov_epon\n")
+
+#ifdef FEATURE_SUPPORT_RDKLOG
+    pComponentName = compName;
+    rdk_logger_init(DEBUG_INI_NAME);
+#endif
 
     daemonize();
 
