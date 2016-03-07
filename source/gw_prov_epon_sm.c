@@ -31,16 +31,6 @@
 #include "stdbool.h"
 #include "gw_prov_epon.h"
 
-#ifdef HAVE_NETLINK_SUPPORT
-#include <asm/types.h>
-#include <sys/socket.h>
-#include <linux/netlink.h>
-#include <linux/rtnetlink.h>
-#include <sys/time.h>
-
-static pthread_t netlink_tid;
-#endif
-
 /**************************************************************************/
 /*      LOCAL VARIABLES:                                                  */
 /**************************************************************************/
@@ -67,7 +57,7 @@ const char compName[25]="LOG.RDK.GWEPON";
 #define GWPROVEPONLOG(x, ...) {fprintf(stderr, "GwProvEponLog<%s:%d> ", __FUNCTION__, __LINE__);fprintf(stderr, __VA_ARGS__);}
 #endif
 
-#define IF_WANBRIDGE "wanbridge"
+#define IF_WANBRIDGE "erouter0"
 #define _DEBUG 1
 #define THREAD_NAME_LEN 16 //length is restricted to 16 characters, including the terminating null byte
 
@@ -77,195 +67,6 @@ const char compName[25]="LOG.RDK.GWEPON";
 static void GWPEpon_StartIPProvisioning();
 static void GWPEpon_StopIPProvisioning();
 static int GWPEpon_SysCfgSetInt(const char *name, int int_value);
-
-
-#ifdef HAVE_NETLINK_SUPPORT
-/*
-*********************************************************************************
-**  Function Name: netlink_read_event
-**
-**  PURPOSE:
-**     .
-**
-**  PARAMETERS:
-**      1. int sockint
-**
-**  RETURNS:
-**     None.
-**
-**  NOTES:
-**     None.
-**
-*********************************************************************************
-*/
-static int netlink_read_event (int sockint)
-{
-    int status;
-    int ret = 0;
-    char buf[4096];
-    struct iovec iov = { buf, sizeof(buf) };
-    struct sockaddr_nl snl;
-    struct msghdr msg = { (void *) &snl, sizeof snl, &iov, 1, NULL, 0, 0 };
-    struct nlmsghdr *h;
-    struct ifinfomsg *ifi;
-    struct ifaddrmsg *ifa;
-
-    char netLinkStatus[12];
-    unsigned int if_index = 0;
-    char epon_ifname[32];
-
-    status = recvmsg (sockint, &msg, 0);
-
-    if (status < 0)
-    {
-        /* Socket non-blocking so bail out once we have read everything */
-        if (errno == EWOULDBLOCK || errno == EAGAIN)
-            return ret;
-
-        /* Anything else is an error */
-        GWPROVEPONLOG(ERROR, "read_netlink: Error recvmsg: %d\n", status);
-        return status;
-    }
-
-    if (status == 0)
-    {
-        GWPROVEPONLOG(INFO, "read_netlink: EOF\n");
-    }
-
-    // We need to handle more than one message per 'recvmsg'
-    for (h = (struct nlmsghdr *) buf; NLMSG_OK (h, (unsigned int) status);
-       h = NLMSG_NEXT (h, status))
-    {
-        //Finish reading 
-        if (h->nlmsg_type == NLMSG_DONE)
-            return ret;
-
-        // Message is some kind of error 
-        if (h->nlmsg_type == NLMSG_ERROR)
-        {
-            GWPROVEPONLOG(ERROR, "read_netlink: Message is an error - decode TBD\n");
-            return -1;        // Error
-        }
-
-        //get the interface index
-
-        epon_ifname[0] = '\0';
-
-        sysevent_get(sysevent_fd_gs, sysevent_token_gs, "epon_ifname", epon_ifname, sizeof(epon_ifname));
-
-        if (strlen(epon_ifname) != 0)
-            if_index = if_nametoindex(epon_ifname);
-        else
-            if_index = if_nametoindex(IF_WANBRIDGE);
-
-        ifa = NLMSG_DATA (h);
-
-        if (ifa->ifa_index == if_index)
-        {
-            switch(h->nlmsg_type)
-            {
-                case RTM_NEWLINK:
-                    sysevent_set(sysevent_fd_gs, sysevent_token_gs, "epon_ifstatus", "up", 0);      	
-                break;
-
-                case RTM_DELLINK:
-                    sysevent_set(sysevent_fd_gs, sysevent_token_gs, "epon_ifstatus", "down", 0);      	
-                break;
-
-                case RTM_NEWADDR:
-                    if( ifa->ifa_family & AF_INET6 )
-                        sysevent_set(sysevent_fd_gs, sysevent_token_gs, "ipv6-status", "up", 0);      	
-                    else
-                        sysevent_set(sysevent_fd_gs, sysevent_token_gs, "ipv4-status", "up", 0);      	
-                break;
-
-                case RTM_DELADDR:
-                    if( ifa->ifa_family & AF_INET6 )
-                        sysevent_set(sysevent_fd_gs, sysevent_token_gs, "ipv6-status", "down", 0);      	
-                    else
-                        sysevent_set(sysevent_fd_gs, sysevent_token_gs, "ipv4-status", "down", 0);      	
-                break;
-            }
-
-            GWPROVEPONLOG(WARNING, "%s interface status modified with %s\n", IF_WANBRIDGE, netLinkStatus);
-        }
-    }
-
-    return ret;
-}
-
-/*
-*********************************************************************************
-**  Function Name: GWPEpon_netlink_handler
-**
-**  PURPOSE:
-**     .
-**
-**  PARAMETERS:
-**      1. void *data
-**
-**  RETURNS:
-**     None.
-**
-**  NOTES:
-**     None.
-**
-*********************************************************************************
-*/
-static void *GWPEpon_netlink_handler(void *data)
-{
-    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__)
-
-    fd_set rfds, wfds;
-    struct timeval tv;
-    int retval;
-    struct sockaddr_nl addr;
-
-    int nl_socket = socket (AF_NETLINK, SOCK_RAW, NETLINK_ROUTE);
-    if (nl_socket < 0)
-    {
-        GWPROVEPONLOG(ERROR, "Netlink socket open error!")
-    }
-    else
-    {
-        memset ((void *) &addr, 0, sizeof (addr));
-
-        addr.nl_family = AF_NETLINK;
-        addr.nl_pid = getpid ();
-        addr.nl_groups = RTMGRP_LINK | RTMGRP_IPV4_IFADDR | RTMGRP_IPV6_IFADDR;
-
-        if (bind (nl_socket, (struct sockaddr *) &addr, sizeof (addr)) < 0)
-        {
-            GWPROVEPONLOG(ERROR, "Netlink Socket bind failed!\n");
-        }
-        else
-        {
-            while (1)
-            {
-                FD_ZERO (&rfds);
-                FD_CLR (nl_socket, &rfds);
-                FD_SET (nl_socket, &rfds);
-
-                tv.tv_sec = 10;
-                tv.tv_usec = 0;
-
-                retval = select (FD_SETSIZE, &rfds, NULL, NULL, &tv);
-                if (retval == -1)
-                    GWPROVEPONLOG(ERROR, "Netlink select() error!\n");
-                else if (retval)
-                {
-                    GWPROVEPONLOG(WARNING, "Netlink event recieved\n");
-                    netlink_read_event (nl_socket);
-                }
-                //else
-                //printf ("## Select TimedOut ## \n");
-            }
-        } 
-    }   
-
-    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
-}
-#endif //#ifdef HAVE_NETLINK_SUPPORT
 
 /**************************************************************************/
 /*! \fn int SetProvisioningStatus();
@@ -429,6 +230,85 @@ static int GWPEpon_ProcessIpv6Up(void)
 
     SetProvisioningStatus(EPON_OPER_IPV6_UP);
 
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
+    return 0;
+}
+
+static int GWPEpon_ProcessLanStart()
+{
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__)
+		
+    system("sh /usr/ccsp/lan_handler.sh lan_start"); 
+	
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
+    return 0;
+}
+static int GWPEpon_ProcessLanStop()
+{
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__)
+		
+    system("sh /usr/ccsp/lan_handler.sh lan_stop");
+	
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
+    return 0;
+}
+
+static int GWPEpon_ProcessEthEnable()
+{
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__)
+		
+    system("sh /usr/ccsp/lan_handler.sh eth_enable");
+	
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
+    return 0;
+}
+
+static int GWPEpon_ProcessEthDisable()
+{
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__)
+		
+    system("sh /usr/ccsp/lan_handler.sh eth_disable");
+	
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
+    return 0;
+}
+
+static int GWPEpon_ProcessMoCAEnable()
+{
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__)
+		
+    system("sh /usr/ccsp/lan_handler.sh moca_enable");
+	
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
+    return 0;
+}
+
+static int GWPEpon_ProcessMoCADisable()
+{
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__)
+		
+    system("sh /usr/ccsp/lan_handler.sh moca_disable");
+	
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
+    return 0;
+}
+
+static int GWPEpon_ProcessWlEnable()
+{
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__)
+		
+    system("sh /usr/ccsp/lan_handler.sh wl_enable");
+	
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
+    return 0;
+}
+
+static int GWPEpon_ProcessWlDisable()
+{
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__)
+		
+    system("sh /usr/ccsp/lan_handler.sh wl_disable");
+	
     GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
     return 0;
 }
@@ -601,6 +481,10 @@ static void *GWPEpon_sysevent_handler(void *data)
     async_id_t epon_ifstatus_asyncid;
     async_id_t ipv4_status_asyncid;
     async_id_t ipv6_status_asyncid;
+    async_id_t lan_status_asyncid;
+    async_id_t eth_status_asyncid;
+    async_id_t moca_status_asyncid;
+    async_id_t wl_status_asyncid;
     static unsigned char firstBoot=1;
 
     sysevent_set_options(sysevent_fd, sysevent_token, "epon_ifstatus", TUPLE_FLAG_EVENT);
@@ -616,7 +500,18 @@ static void *GWPEpon_sysevent_handler(void *data)
     sysevent_set_options(sysevent_fd_gs, sysevent_token, "epon_prov_status", TUPLE_FLAG_EVENT);
     sysevent_set_options(sysevent_fd_gs, sysevent_token, "prov_status", TUPLE_FLAG_EVENT);
 
-    
+    sysevent_set_options(sysevent_fd, sysevent_token, "lan_status", TUPLE_FLAG_EVENT);
+    sysevent_setnotification(sysevent_fd, sysevent_token, "lan_status",  &lan_status_asyncid);
+
+    sysevent_set_options(sysevent_fd, sysevent_token, "eth_status", TUPLE_FLAG_EVENT);
+    sysevent_setnotification(sysevent_fd, sysevent_token, "eth_status",  &eth_status_asyncid);
+
+    sysevent_set_options(sysevent_fd, sysevent_token, "moca_status", TUPLE_FLAG_EVENT);
+    sysevent_setnotification(sysevent_fd, sysevent_token, "moca_status",  &moca_status_asyncid);
+
+    sysevent_set_options(sysevent_fd, sysevent_token, "wl_status", TUPLE_FLAG_EVENT);
+    sysevent_setnotification(sysevent_fd, sysevent_token, "wl_status",  &wl_status_asyncid);
+
    for (;;)
    {
         unsigned char name[25], val[42];
@@ -676,6 +571,50 @@ static void *GWPEpon_sysevent_handler(void *data)
                     GWPEpon_ProcessIpv6Down();
                 }
             }
+            else if (strcmp(name, "lan_status")==0)
+            {
+                if (strcmp(val, "start")==0)
+                {
+                    GWPEpon_ProcessLanStart();
+                }
+                else if (strcmp(val, "stop")==0)
+                {
+                    GWPEpon_ProcessLanStop();
+                }
+            }
+            else if (strcmp(name, "eth_status")==0)
+            {
+                if (strcmp(val, "enable")==0)
+                {
+                    GWPEpon_ProcessEthEnable();
+                }
+                else if (strcmp(val, "disable")==0)
+                {
+                    GWPEpon_ProcessEthDisable();
+                }
+            }
+            else if (strcmp(name, "moca_status")==0)
+            {
+                if (strcmp(val, "enable")==0)
+                {
+                    GWPEpon_ProcessMoCAEnable();
+                }
+                else if (strcmp(val, "disable")==0)
+                {
+                    GWPEpon_ProcessMoCADisable();
+                }
+            }
+            else if (strcmp(name, "wl_status")==0)
+            {
+                if (strcmp(val, "enable")==0)
+                {
+                    GWPEpon_ProcessWlEnable();
+                }
+                else if (strcmp(val, "disable")==0)
+                {
+                    GWPEpon_ProcessWlDisable();
+                }
+            }
             else
             {
                GWPROVEPONLOG(WARNING, "undefined event %s \n",name)
@@ -687,6 +626,23 @@ static void *GWPEpon_sysevent_handler(void *data)
         }
     }
 
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
+}
+
+
+static void  notifySysEvents()
+{
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__)
+    unsigned char out_value[20];
+    int outbufsz = sizeof(out_value);
+
+    if (!syscfg_get(NULL, "lan_status", out_value, outbufsz))
+    {
+        if (strcmp(out_value, "start") == 0)
+        {
+            sysevent_set(sysevent_fd_gs, sysevent_token_gs, "lan_status", "start", 0);
+        }
+    }	
     GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
 }
 
@@ -716,12 +672,7 @@ static void GWPEpon_SetDefaults()
     sysevent_get(sysevent_fd_gs, sysevent_token_gs, "epon_ifname", buf, sizeof(buf));
     if (buf[0] != '\0')
     {
-        sysevent_set(sysevent_fd_gs, sysevent_token_gs, "epon_ifname", "wanbridge", 0);
-    }
-    sysevent_get(sysevent_fd_gs, sysevent_token_gs, "lan_ifstatus", buf, sizeof(buf));
-    if (buf[0] != '\0')
-    {
-        sysevent_set(sysevent_fd_gs, sysevent_token_gs, "lan_ifstatus", "up", 0);
+        sysevent_set(sysevent_fd_gs, sysevent_token_gs, "epon_ifname", IF_WANBRIDGE, 0);
     }
     sysevent_get(sysevent_fd_gs, sysevent_token_gs, "epon_ifstatus", buf, sizeof(buf));
     if (buf[0] != '\0')
@@ -807,32 +758,14 @@ static int GWPEpon_Init()
                 GWPROVEPONLOG(INFO, "GWPEpon_sysevent_handler thread name %s set successfully\n", thread_name)
             else
                 GWPROVEPONLOG(ERROR, "%s error occured while setting GWPEpon_sysevent_handler thread name\n", strerror(errno))
+                
+            sleep(5);
         }
         else
         {
             GWPROVEPONLOG(ERROR, "%s error occured while creating GWPEpon_sysevent_handler thread\n", strerror(errno))
             status = -1;
         }
-
-#ifdef HAVE_NETLINK_SUPPORT
-        GWPROVEPONLOG(INFO, "Entering HAVE_NETLINK_SUPPORT")
-        thread_status = 0;
-        thread_status = pthread_create(&netlink_tid, NULL, GWPEpon_netlink_handler, NULL);
-        if (thread_status == 0)
-        {
-            GWPROVEPONLOG(INFO, "GWPEpon_netlink_handler thread created successfully\n");
-
-            memset( thread_name, '\0', sizeof(char) * THREAD_NAME_LEN );
-            strcpy( thread_name, "GWPEponnetlink" );
-
-            if (pthread_setname_np(netlink_tid, thread_name) == 0)
-                GWPROVEPONLOG(INFO, "GWPEpon_netlink_handler thread name '%s' set successfully\n", thread_name)
-            else
-                GWPROVEPONLOG(ERROR, "%s error occured while setting GWPEpon_netlink_handler thread name\n", strerror(errno))
-        }
-        else
-            GWPROVEPONLOG(ERROR, "%s occured while creating GWPEpon_netlink_handler thread\n", strerror(errno)) 
-#endif
     }
     GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
     return status;
@@ -961,7 +894,7 @@ int main(int argc, char *argv[])
             else
             {
                 GWPROVEPONLOG(INFO, "GwProvEpon initialization completed\n")
-
+                notifySysEvents();
                 //wait for sysevent_tid thread to terminate
                 pthread_join(sysevent_tid, NULL);
                 
