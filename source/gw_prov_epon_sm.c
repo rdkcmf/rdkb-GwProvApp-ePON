@@ -57,7 +57,10 @@ const char compName[25]="LOG.RDK.GWEPON";
 #define GWPROVEPONLOG(x, ...) {fprintf(stderr, "GwProvEponLog<%s:%d> ", __FUNCTION__, __LINE__);fprintf(stderr, __VA_ARGS__);}
 #endif
 
+#if 0
 #define IF_WANBRIDGE "erouter0"
+#endif
+
 #define _DEBUG 1
 #define THREAD_NAME_LEN 16 //length is restricted to 16 characters, including the terminating null byte
 
@@ -134,6 +137,7 @@ static void SetProvisioningStatus(EPON_IpProvStatus status)
     GWPROVEPONLOG(INFO, "epon_prov_status=%s %d\n",value, prov_status)
     //TODO:To be added in EPON gateway provisiong data model
     sysevent_set(sysevent_fd_gs, sysevent_token_gs, "epon_prov_status", value, sizeof(value));
+    sysevent_set(sysevent_fd_gs,sysevent_token_gs,"dhcp_server-restart", "1", sizeof("1"));
 
     GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
 }
@@ -243,6 +247,17 @@ static int GWPEpon_ProcessLanStart()
     GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
     return 0;
 }
+
+static int GWPEpon_ProcessDHCPStart()
+{
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__)
+		
+    system("sh /usr/ccsp/lan_handler.sh dhcp_restart"); 
+	
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
+    return 0;
+}
+
 static int GWPEpon_ProcessLanStop()
 {
     GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__)
@@ -503,11 +518,17 @@ static void *GWPEpon_sysevent_handler(void *data)
     sysevent_set_options(sysevent_fd, sysevent_token, "lan_status", TUPLE_FLAG_EVENT);
     sysevent_setnotification(sysevent_fd, sysevent_token, "lan_status",  &lan_status_asyncid);
 
+    sysevent_set_options(sysevent_fd, sysevent_token, "lan-restart", TUPLE_FLAG_EVENT);
+    sysevent_setnotification(sysevent_fd, sysevent_token, "lan-restart",  &lan_status_asyncid);
+
+    sysevent_set_options(sysevent_fd, sysevent_token, "dhcp_server-restart", TUPLE_FLAG_EVENT);
+    sysevent_setnotification(sysevent_fd, sysevent_token, "dhcp_server-restart",  &lan_status_asyncid);
+
     sysevent_set_options(sysevent_fd, sysevent_token, "eth_status", TUPLE_FLAG_EVENT);
     sysevent_setnotification(sysevent_fd, sysevent_token, "eth_status",  &eth_status_asyncid);
 
-    sysevent_set_options(sysevent_fd, sysevent_token, "moca_status", TUPLE_FLAG_EVENT);
-    sysevent_setnotification(sysevent_fd, sysevent_token, "moca_status",  &moca_status_asyncid);
+    sysevent_set_options(sysevent_fd, sysevent_token, "moca_enabled", TUPLE_FLAG_EVENT);
+    sysevent_setnotification(sysevent_fd, sysevent_token, "moca_enabled",  &moca_status_asyncid);
 
     sysevent_set_options(sysevent_fd, sysevent_token, "wl_status", TUPLE_FLAG_EVENT);
     sysevent_setnotification(sysevent_fd, sysevent_token, "wl_status",  &wl_status_asyncid);
@@ -582,7 +603,15 @@ static void *GWPEpon_sysevent_handler(void *data)
                     GWPEpon_ProcessLanStop();
                 }
             }
-            else if (strcmp(name, "eth_status")==0)
+             else if (strcmp(name, "lan-restart")==0)
+            {
+                GWPEpon_ProcessLanStart();
+            }
+             else if (strcmp(name, "dhcp_server-restart")==0)
+            {
+                GWPEpon_ProcessDHCPStart();
+            }
+           else if (strcmp(name, "eth_status")==0)
             {
                 if (strcmp(val, "enable")==0)
                 {
@@ -593,13 +622,13 @@ static void *GWPEpon_sysevent_handler(void *data)
                     GWPEpon_ProcessEthDisable();
                 }
             }
-            else if (strcmp(name, "moca_status")==0)
+            else if (strcmp(name, "moca_enabled")==0)
             {
-                if (strcmp(val, "enable")==0)
+                if (strcmp(val, "1")==0)
                 {
                     GWPEpon_ProcessMoCAEnable();
                 }
-                else if (strcmp(val, "disable")==0)
+                else if (strcmp(val, "0")==0)
                 {
                     GWPEpon_ProcessMoCADisable();
                 }
@@ -643,6 +672,13 @@ static void  notifySysEvents()
             sysevent_set(sysevent_fd_gs, sysevent_token_gs, "lan_status", "start", 0);
         }
     }	
+    if (!syscfg_get(NULL, "dhcp_server_enabled", out_value, outbufsz))
+    {
+        if (strcmp(out_value, "1") == 0)
+        {
+            sysevent_set(sysevent_fd_gs, sysevent_token_gs, "dhcp_server-restart", "1", 0);
+        }
+    }	
     GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
 }
 
@@ -669,11 +705,13 @@ static void GWPEpon_SetDefaults()
         GWPEpon_SyseventSetInt("prov_status",0);
     }
 
+#if 0
     sysevent_get(sysevent_fd_gs, sysevent_token_gs, "epon_ifname", buf, sizeof(buf));
     if (buf[0] != '\0')
     {
         sysevent_set(sysevent_fd_gs, sysevent_token_gs, "epon_ifname", IF_WANBRIDGE, 0);
     }
+#endif
     sysevent_get(sysevent_fd_gs, sysevent_token_gs, "epon_ifstatus", buf, sizeof(buf));
     if (buf[0] != '\0')
     {
