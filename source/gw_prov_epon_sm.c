@@ -238,11 +238,11 @@ static int GWPEpon_ProcessIpv6Up(void)
     return 0;
 }
 
-static int GWPEpon_ProcessLanStart()
+static int GWPEpon_ProcessLanWanConnect()
 {
     GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__)
 		
-    system("sh /usr/ccsp/lan_handler.sh lan_start"); 
+    system("sh /usr/ccsp/lan_handler.sh lan_wan_connect"); 
 	
     GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
     return 0;
@@ -258,11 +258,11 @@ static int GWPEpon_ProcessDHCPStart()
     return 0;
 }
 
-static int GWPEpon_ProcessLanStop()
+static int GWPEpon_ProcessLanWanDisconnect()
 {
     GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__)
 		
-    system("sh /usr/ccsp/lan_handler.sh lan_stop");
+    system("sh /usr/ccsp/lan_handler.sh lan_wan_disconnect");
 	
     GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
     return 0;
@@ -449,6 +449,7 @@ static void GWPEpon_StartIPProvisioning()
             if (!(prov_status & EPON_OPER_IPV6_UP))
             {
                 //dibbler (Ipv6) 
+                system("touch /tmp/.start_ipv6");
                 system("systemctl start dibbler.service");
             }
         }
@@ -456,6 +457,7 @@ static void GWPEpon_StartIPProvisioning()
         {
             if (!(prov_status & EPON_OPER_IPV6_UP))
             {
+                system("touch /tmp/.start_ipv6");
                 system("systemctl start dibbler.service");
             }
 
@@ -470,6 +472,7 @@ static void GWPEpon_StartIPProvisioning()
          //check with scott : consider DHCP IP PREF
             if (!(prov_status & EPON_OPER_IPV6_UP))
             {
+                system("touch /tmp/.start_ipv6");
                 system("systemctl start dibbler.service");
             }
 
@@ -496,7 +499,13 @@ static void *GWPEpon_sysevent_handler(void *data)
     async_id_t epon_ifstatus_asyncid;
     async_id_t ipv4_status_asyncid;
     async_id_t ipv6_status_asyncid;
-    async_id_t lan_status_asyncid;
+    async_id_t ipv4_ippref_asyncid;
+    async_id_t ipv6_ippref_asyncid;
+    async_id_t ipv4_timeoffset_asyncid;
+    async_id_t ipv6_timeoffset_asyncid;	
+    async_id_t lan_wan_connect_asyncid;
+    async_id_t lan_restart_connect_asyncid;
+    async_id_t dhcp_server_status_asyncid;
     async_id_t eth_status_asyncid;
     async_id_t moca_status_asyncid;
     async_id_t wl_status_asyncid;
@@ -504,34 +513,45 @@ static void *GWPEpon_sysevent_handler(void *data)
 
     sysevent_set_options(sysevent_fd, sysevent_token, "epon_ifstatus", TUPLE_FLAG_EVENT);
     sysevent_setnotification(sysevent_fd, sysevent_token, "epon_ifstatus", &epon_ifstatus_asyncid);
+
     sysevent_set_options(sysevent_fd, sysevent_token, "ipv4-status", TUPLE_FLAG_EVENT);
     sysevent_setnotification(sysevent_fd, sysevent_token, "ipv4-status",  &ipv4_status_asyncid);
-    sysevent_set_options(sysevent_fd, sysevent_token, "ipv6-status", TUPLE_FLAG_EVENT);
-    sysevent_setnotification(sysevent_fd, sysevent_token, "ipv6-status",  &ipv6_status_asyncid);
+
+    sysevent_set_options(sysevent_fd, sysevent_token, "ipv4-ip-pref", TUPLE_FLAG_EVENT);
+    sysevent_setnotification(sysevent_fd, sysevent_token, "ipv4-ip-pref",  &ipv4_ippref_asyncid);
+
+    sysevent_set_options(sysevent_fd, sysevent_token, "ipv4-timeoffset", TUPLE_FLAG_EVENT);
+    sysevent_setnotification(sysevent_fd, sysevent_token, "ipv4-timeoffset",  &ipv4_timeoffset_asyncid);
 
     sysevent_set_options(sysevent_fd, sysevent_token, "ipv6-status", TUPLE_FLAG_EVENT);
     sysevent_setnotification(sysevent_fd, sysevent_token, "ipv6-status",  &ipv6_status_asyncid);
 
-    sysevent_set_options(sysevent_fd_gs, sysevent_token, "epon_prov_status", TUPLE_FLAG_EVENT);
-    sysevent_set_options(sysevent_fd_gs, sysevent_token, "prov_status", TUPLE_FLAG_EVENT);
+    sysevent_set_options(sysevent_fd, sysevent_token, "ipv6-ip-pref", TUPLE_FLAG_EVENT);
+    sysevent_setnotification(sysevent_fd, sysevent_token, "ipv6-ip-pref",  &ipv6_ippref_asyncid);
 
-    sysevent_set_options(sysevent_fd, sysevent_token, "lan_status", TUPLE_FLAG_EVENT);
-    sysevent_setnotification(sysevent_fd, sysevent_token, "lan_status",  &lan_status_asyncid);
+    sysevent_set_options(sysevent_fd, sysevent_token, "ipv6-timeoffset", TUPLE_FLAG_EVENT);
+    sysevent_setnotification(sysevent_fd, sysevent_token, "ipv6-timeoffset",  &ipv6_timeoffset_asyncid);
+
+    sysevent_set_options(sysevent_fd, sysevent_token, "lan_wan_connect", TUPLE_FLAG_EVENT);
+    sysevent_setnotification(sysevent_fd, sysevent_token, "lan_wan_connect",  &lan_wan_connect_asyncid);
 
     sysevent_set_options(sysevent_fd, sysevent_token, "lan-restart", TUPLE_FLAG_EVENT);
-    sysevent_setnotification(sysevent_fd, sysevent_token, "lan-restart",  &lan_status_asyncid);
+    sysevent_setnotification(sysevent_fd, sysevent_token, "lan-restart",  &lan_restart_connect_asyncid);
 
     sysevent_set_options(sysevent_fd, sysevent_token, "dhcp_server-restart", TUPLE_FLAG_EVENT);
-    sysevent_setnotification(sysevent_fd, sysevent_token, "dhcp_server-restart",  &lan_status_asyncid);
+    sysevent_setnotification(sysevent_fd, sysevent_token, "dhcp_server-restart",  &dhcp_server_status_asyncid);
 
-    sysevent_set_options(sysevent_fd, sysevent_token, "eth_status", TUPLE_FLAG_EVENT);
-    sysevent_setnotification(sysevent_fd, sysevent_token, "eth_status",  &eth_status_asyncid);
+    sysevent_set_options(sysevent_fd, sysevent_token, "eth_enabled", TUPLE_FLAG_EVENT);
+    sysevent_setnotification(sysevent_fd, sysevent_token, "eth_enabled",  &eth_status_asyncid);
 
     sysevent_set_options(sysevent_fd, sysevent_token, "moca_enabled", TUPLE_FLAG_EVENT);
     sysevent_setnotification(sysevent_fd, sysevent_token, "moca_enabled",  &moca_status_asyncid);
 
-    sysevent_set_options(sysevent_fd, sysevent_token, "wl_status", TUPLE_FLAG_EVENT);
-    sysevent_setnotification(sysevent_fd, sysevent_token, "wl_status",  &wl_status_asyncid);
+    sysevent_set_options(sysevent_fd, sysevent_token, "wl_enabled", TUPLE_FLAG_EVENT);
+    sysevent_setnotification(sysevent_fd, sysevent_token, "wl_enabled",  &wl_status_asyncid);
+
+    sysevent_set_options(sysevent_fd_gs, sysevent_token, "epon_prov_status", TUPLE_FLAG_EVENT);
+    sysevent_set_options(sysevent_fd_gs, sysevent_token, "prov_status", TUPLE_FLAG_EVENT);
 
    for (;;)
    {
@@ -592,32 +612,44 @@ static void *GWPEpon_sysevent_handler(void *data)
                     GWPEpon_ProcessIpv6Down();
                 }
             }
-            else if (strcmp(name, "lan_status")==0)
+            else if (strcmp(name, "ipv4-ip-pref")==0)
             {
-                if (strcmp(val, "start")==0)
+            }
+            else if (strcmp(name, "ipv6-ip-pref")==0)
+            {
+            }		
+            else if (strcmp(name, "ipv4-timeoffset")==0)
+            {
+            }
+            else if (strcmp(name, "ipv6-timeoffset")==0)
+            {
+            }
+            else if (strcmp(name, "lan_wan_connect")==0)
+            {
+                if (strcmp(val, "1")==0)
                 {
-                    GWPEpon_ProcessLanStart();
+                    GWPEpon_ProcessLanWanConnect();
                 }
-                else if (strcmp(val, "stop")==0)
+                else if (strcmp(val, "0")==0)
                 {
-                    GWPEpon_ProcessLanStop();
+                    GWPEpon_ProcessLanWanDisconnect();
                 }
             }
-             else if (strcmp(name, "lan-restart")==0)
+            else if (strcmp(name, "lan-restart")==0)
             {
-                GWPEpon_ProcessLanStart();
+                GWPEpon_ProcessLanWanConnect();
             }
-             else if (strcmp(name, "dhcp_server-restart")==0)
+            else if (strcmp(name, "dhcp_server-restart")==0)
             {
                 GWPEpon_ProcessDHCPStart();
             }
-           else if (strcmp(name, "eth_status")==0)
+           else if (strcmp(name, "eth_enabled")==0)
             {
-                if (strcmp(val, "enable")==0)
+                if (strcmp(val, "1")==0)
                 {
                     GWPEpon_ProcessEthEnable();
                 }
-                else if (strcmp(val, "disable")==0)
+                else if (strcmp(val, "0")==0)
                 {
                     GWPEpon_ProcessEthDisable();
                 }
@@ -633,13 +665,13 @@ static void *GWPEpon_sysevent_handler(void *data)
                     GWPEpon_ProcessMoCADisable();
                 }
             }
-            else if (strcmp(name, "wl_status")==0)
+            else if (strcmp(name, "wl_enabled")==0)
             {
-                if (strcmp(val, "enable")==0)
+                if (strcmp(val, "1")==0)
                 {
                     GWPEpon_ProcessWlEnable();
                 }
-                else if (strcmp(val, "disable")==0)
+                else if (strcmp(val, "0")==0)
                 {
                     GWPEpon_ProcessWlDisable();
                 }
@@ -665,20 +697,16 @@ static void  notifySysEvents()
     unsigned char out_value[20];
     int outbufsz = sizeof(out_value);
 
-    if (!syscfg_get(NULL, "lan_status", out_value, outbufsz))
+    if (GWPEpon_SysCfgGetInt("lan_wan_connect") == 1)
     {
-        if (strcmp(out_value, "start") == 0)
-        {
-            sysevent_set(sysevent_fd_gs, sysevent_token_gs, "lan_status", "start", 0);
-        }
+        sysevent_set(sysevent_fd_gs, sysevent_token_gs, "lan_wan_connect", "1", 0);
     }	
-    if (!syscfg_get(NULL, "dhcp_server_enabled", out_value, outbufsz))
+
+    if (GWPEpon_SysCfgGetInt("dhcp_server_enabled") == 1)
     {
-        if (strcmp(out_value, "1") == 0)
-        {
-            sysevent_set(sysevent_fd_gs, sysevent_token_gs, "dhcp_server-restart", "1", 0);
-        }
+        sysevent_set(sysevent_fd_gs, sysevent_token_gs, "dhcp_server-restart", "1", 0);
     }	
+
     GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
 }
 
