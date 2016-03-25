@@ -70,6 +70,7 @@ const char compName[25]="LOG.RDK.GWEPON";
 static void GWPEpon_StartIPProvisioning();
 static void GWPEpon_StopIPProvisioning();
 static int GWPEpon_SysCfgSetInt(const char *name, int int_value);
+static int GWPEpon_SysCfgGetInt(const char *name);
 
 /**************************************************************************/
 /*! \fn int SetProvisioningStatus();
@@ -132,7 +133,7 @@ static void SetProvisioningStatus(EPON_IpProvStatus status)
         strcat(value, ip_status[EPON_OPER_IPV4_DOWN]);
     }
 
-    GWPEpon_SysCfgSetInt("factory_mode", 0); // We have been provisioned
+//    GWPEpon_SysCfgSetInt("factory_mode", 0); // We have been provisioned
     GWPEpon_SyseventSetInt("prov_status",prov_status);
     GWPROVEPONLOG(INFO, "epon_prov_status=%s %d\n",value, prov_status)
     //TODO:To be added in EPON gateway provisiong data model
@@ -242,7 +243,16 @@ static int GWPEpon_ProcessLanWanConnect()
 {
     GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__)
 		
-    system("sh /usr/ccsp/lan_handler.sh lan_wan_connect"); 
+    int prov_mode = GWPEpon_SysCfgGetInt("gw_prov_mode");
+    int factory_mode = GWPEpon_SysCfgGetInt("factory_mode");
+    if((factory_mode == 1) ||(prov_mode == 1)) /* 0 = Factory mode and 1 = provisioned mode */
+    {
+        system("sh /usr/ccsp/lan_handler.sh lan_wan_connect"); 
+    }
+    else
+    {
+       GWPROVEPONLOG(WARNING,"Refusing to allow LAN ACCESS to WAN on prov_mode %d\n",prov_mode);
+    }
 	
     GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
     return 0;
@@ -450,7 +460,7 @@ static void GWPEpon_StartIPProvisioning()
             {
                 //dibbler (Ipv6) 
                 system("touch /tmp/.start_ipv6");
-                system("systemctl start dibbler.service");
+                system("systemctl restart dibbler.service");
             }
         }
         else if(routerIpModeOverride == IpProvModeDualStack)
@@ -458,13 +468,13 @@ static void GWPEpon_StartIPProvisioning()
             if (!(prov_status & EPON_OPER_IPV6_UP))
             {
                 system("touch /tmp/.start_ipv6");
-                system("systemctl start dibbler.service");
+                system("systemctl restart dibbler.service");
             }
 
             if (!(prov_status & EPON_OPER_IPV4_UP))
             {
                 system("touch /tmp/.start_ipv4");
-                system("systemctl start udhcp.service");
+                system("systemctl restart udhcp.service");
             }
         }
         else if(routerIpModeOverride == IpProvModeHonor)
@@ -473,13 +483,13 @@ static void GWPEpon_StartIPProvisioning()
             if (!(prov_status & EPON_OPER_IPV6_UP))
             {
                 system("touch /tmp/.start_ipv6");
-                system("systemctl start dibbler.service");
+                system("systemctl restart dibbler.service");
             }
 
             if (!(prov_status & EPON_OPER_IPV4_UP))
             {
                 system("touch /tmp/.start_ipv4");
-                system("systemctl start udhcp.service");            
+                system("systemctl restart udhcp.service");            
             }
         }
     }
@@ -563,10 +573,10 @@ static void *GWPEpon_sysevent_handler(void *data)
 
         if (firstBoot)
         {
-           err = sysevent_get(sysevent_fd_gs, sysevent_token_gs, "epon_ifstatus", val, vallen);
-           firstBoot = 0;
-           strcpy(val, "up");
+           /* In case we missed an event notification before the thread starts */
            strcpy(name,"epon_ifstatus");
+           err = sysevent_get(sysevent_fd_gs, sysevent_token_gs, name, val, vallen);
+           firstBoot = 0;
         }
         else
            err = sysevent_getnotification(sysevent_fd, sysevent_token, name, &namelen,  val, &vallen, &getnotification_asyncid);
@@ -718,7 +728,7 @@ static void GWPEpon_SetDefaults()
     if (GWPEpon_SysCfgGetInt("factory_mode") < 0)
     {
         GWPROVEPONLOG(INFO, "setting default factory mode\n")
-        GWPEpon_SysCfgSetInt("factory_mode", 0);   
+        GWPEpon_SysCfgSetInt("factory_mode", 1);   
     }
 
     if (GWPEpon_SysCfgGetInt("router_ip_mode_override") < 0)
@@ -733,6 +743,12 @@ static void GWPEpon_SetDefaults()
         GWPEpon_SyseventSetInt("prov_status",0);
     }
 
+    if (GWPEpon_SysCfgGetInt("gw_prov_mode") < 0)
+    {
+        GWPROVEPONLOG(INFO, "setting default gw prov mode to unprovisioned\n")
+        GWPEpon_SysCfgSetInt("gw_prov_mode", 0);   
+    }
+   
 #if 0
     sysevent_get(sysevent_fd_gs, sysevent_token_gs, "epon_ifname", buf, sizeof(buf));
     if (buf[0] != '\0')
