@@ -13,9 +13,12 @@ char *pComponentName = NULL;
 typedef enum
 {
     IpProvModeNone = 0,
-    IpProvModeIpv6Only,
-    IpProvModeDualStack,
-    IpProvModeHonor
+    IpProvModeIpv4Only=1,
+    IpProvModeIpv6Only=2,
+    IpProvModeDualStack=3,
+    IpProvModeHonor=4,
+    IpProvModeIpv4DualStack=5,
+    IpProvModeIpv6DualStack=6
 } EPON_IpProvMode;
 
 typedef enum

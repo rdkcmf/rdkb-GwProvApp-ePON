@@ -34,10 +34,6 @@
 /**************************************************************************/
 /*      LOCAL VARIABLES:                                                  */
 /**************************************************************************/
-
-static int  factory_mode = 0;
-static EPON_IpProvMode routerIpModeOverride = IpProvModeHonor;
-
 static int sysevent_fd;
 static token_t sysevent_token;
 static int sysevent_fd_gs;
@@ -69,8 +65,16 @@ const char compName[25]="LOG.RDK.GWEPON";
 /**************************************************************************/
 static void GWPEpon_StartIPProvisioning();
 static void GWPEpon_StopIPProvisioning();
+static void GWPEpon_ProcessIPProvisioning(EPON_IpProvMode routerIpModeOverride, int update_db);
+static void GWPEpon_ProcessXconfGwProvMode();
+static void GWPEpon_ProcessLanWanReconnect();
+static int GWPEpon_ProcessLanWanConnect(EPON_IpProvStatus status);
+static int GWPEpon_ProcessIpv4Down(void);
+static int GWPEpon_ProcessIpv6Down(void);
 static int GWPEpon_SysCfgSetInt(const char *name, int int_value);
 static int GWPEpon_SysCfgGetInt(const char *name);
+static int GWPEpon_SysCfgGetStr(const char *name, unsigned char *out_value, int outbufsz);
+static int GWPEpon_SysCfgSetStr(const char *name, unsigned char *str_value);
 
 /**************************************************************************/
 /*! \fn int SetProvisioningStatus();
@@ -83,39 +87,42 @@ static void SetProvisioningStatus(EPON_IpProvStatus status)
     GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__)
 
     const char * ip_status[] = { "None", "Ipv6", "NoIpv6", "Ipv4", "NoIpv4"};
-    unsigned  char value[20]; //use unsigned char all over
+    unsigned  char value[20];
     value[0] = '\0' ;
 
-    int prov_status = 0;
-    prov_status = GWPEpon_SyseventGetInt("prov_status");
+    int gw_prov_status = 0;
+    gw_prov_status = GWPEpon_SyseventGetInt("gw_prov_status");
 
+    if (gw_prov_status < 0)
+		gw_prov_status = 0;
+	
     switch(status)
     {
         case EPON_OPER_IPV6_UP:
-            prov_status |= 0x00000001;
+            gw_prov_status |= 0x00000001;
         break;
 
         case EPON_OPER_IPV6_DOWN:
-            prov_status &= ~(0x00000001);
+            gw_prov_status &= ~(0x00000001);
         break;
 
         case EPON_OPER_IPV4_UP:
-            prov_status |= 0x00000002;
+            gw_prov_status |= 0x00000002;
         break;
 
         case EPON_OPER_IPV4_DOWN:
-            prov_status &= ~(0x00000002);
+            gw_prov_status &= ~(0x00000002);
         break;
 
         case EPON_OPER_NONE:
-            prov_status = 0x00000000;
+            gw_prov_status = 0x00000000;
         break;
-		
+
         default:
         break;
     }
-	
-    if (prov_status & 0x00000001) 
+
+    if (gw_prov_status & 0x00000001)
     {
         strcat(value, ip_status[EPON_OPER_IPV6_UP]);
     }
@@ -123,8 +130,8 @@ static void SetProvisioningStatus(EPON_IpProvStatus status)
     {
         strcat(value, ip_status[EPON_OPER_IPV6_DOWN]);
     }
-	
-    if (prov_status & 0x00000002) 
+
+    if (gw_prov_status & 0x00000002)
     {
         strcat(value, ip_status[EPON_OPER_IPV4_UP]);
     }
@@ -133,14 +140,132 @@ static void SetProvisioningStatus(EPON_IpProvStatus status)
         strcat(value, ip_status[EPON_OPER_IPV4_DOWN]);
     }
 
-//    GWPEpon_SysCfgSetInt("factory_mode", 0); // We have been provisioned
-    GWPEpon_SyseventSetInt("prov_status",prov_status);
-    GWPROVEPONLOG(INFO, "epon_prov_status=%s %d\n",value, prov_status)
+    GWPEpon_SyseventSetInt("gw_prov_status",gw_prov_status);
+    GWPROVEPONLOG(INFO, "gw_prov_status_str=%s\n",value)
     //TODO:To be added in EPON gateway provisiong data model
-    sysevent_set(sysevent_fd_gs, sysevent_token_gs, "epon_prov_status", value, sizeof(value));
-    sysevent_set(sysevent_fd_gs,sysevent_token_gs,"dhcp_server-restart", "1", sizeof("1"));
+    GWPEpon_SyseventSetStr("gw_prov_status_str", value, sizeof(value));
+    GWPEpon_SyseventSetStr("dhcp_server-restart", "1", sizeof("1"));
 
     GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
+}
+
+static void GWPEpon_StartIPv4Service()
+{
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
+    FILE *fp = NULL;
+
+    if ((fp = fopen("/tmp/.start_ipv4", "r")) == NULL)
+    {
+        system("touch /tmp/.start_ipv4");
+        system("systemctl restart udhcp.service");
+    }
+    else
+       fclose(fp);	
+		
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
+}
+
+static void GWPEpon_StopIPv4Service()
+{
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
+    FILE *fp = NULL;
+
+    if ((fp = fopen("/tmp/.start_ipv4", "r")) != NULL)
+    {
+        if(fp)
+           fclose(fp);
+		
+        system("rm /tmp/.start_ipv4"); 
+        system("systemctl stop udhcp.service");
+        GWPEpon_ProcessIpv4Down();
+    }
+		
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
+}
+
+static void GWPEpon_StartIPv6Service()
+{
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
+    FILE *fp = NULL;
+
+    if ((fp = fopen("/tmp/.start_ipv6", "r")) == NULL)
+    {
+        system("touch /tmp/.start_ipv6");
+        system("systemctl restart dibbler.service");
+    }
+    else
+       fclose(fp);	
+		
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
+}
+
+static void GWPEpon_StopIPv6Service()
+{
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
+    FILE *fp = NULL;
+
+    if ((fp = fopen("/tmp/.start_ipv6", "r")) != NULL)
+    {
+        if(fp)
+           fclose(fp);
+		
+        system("rm /tmp/.start_ipv6"); 
+        system("systemctl stop dibbler.service");
+        GWPEpon_ProcessIpv6Down();
+    }
+		
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
+}
+
+EPON_IpProvMode GWPEpon_GetRouterIpMode()
+{
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__)
+		
+    unsigned char router_ip_mode[20];
+    int outbufsz = sizeof(router_ip_mode);
+    EPON_IpProvMode mode=IpProvModeHonor;
+
+    router_ip_mode[0]='\0';
+    GWPEpon_SysCfgGetStr("router_ip_mode_override", router_ip_mode, outbufsz);
+    GWPROVEPONLOG(INFO, "router_ip_mode_override :%s\n", router_ip_mode);
+    if (strcmp (router_ip_mode, "Honor") == 0)
+    {
+        mode=IpProvModeHonor;
+    }	
+    if (strcmp (router_ip_mode, "Dual Stack") == 0)
+    {
+        mode=IpProvModeDualStack;
+    }
+    if (strcmp (router_ip_mode, "IPv6 only") == 0)
+    {
+        mode=IpProvModeIpv6Only;
+    }
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
+		
+    return mode;
+}
+
+static int GWPEpon_XconfGetSettings(void)
+{
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
+
+    unsigned char out_value[20];
+    int outbufsz = sizeof(out_value);
+    out_value[0] = '\0';
+
+    int retval = GWPEpon_SyseventGetStr("xconf_gs_status", out_value,outbufsz);
+    if(retval < 0)
+    {
+        GWPROVEPONLOG(INFO, "%s Getting xconf configuration parameter\n",__FUNCTION__);
+        system("sh /usr/ccsp/xf3_xconfGetSettings.sh &");
+    }
+    else
+    {
+        GWPROVEPONLOG(INFO, "%s xconf_gs_status=%s\n",__FUNCTION__,out_value);
+    }
+	
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
+    return 0;
 }
 
 /**************************************************************************/
@@ -151,11 +276,11 @@ static void SetProvisioningStatus(EPON_IpProvStatus status)
 **************************************************************************/
 static int GWPEpon_ProcessIfDown(void)
 {
-    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__)
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
 
     GWPEpon_StopIPProvisioning();
 
-    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
     return 0;
 }
 
@@ -167,11 +292,11 @@ static int GWPEpon_ProcessIfDown(void)
 **************************************************************************/
 static int GWPEpon_ProcessIfUp(void)
 {
-    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__)
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
 
     GWPEpon_StartIPProvisioning();
 
-    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
     return 0;
 }
 
@@ -183,11 +308,11 @@ static int GWPEpon_ProcessIfUp(void)
 **************************************************************************/
 static int GWPEpon_ProcessIpv4Down(void)
 {
-    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__)
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
 
     SetProvisioningStatus(EPON_OPER_IPV4_DOWN);
-
-    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
+    GWPEpon_ProcessLanWanConnect(EPON_OPER_IPV4_DOWN);	
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
     return 0;
 }
 
@@ -199,11 +324,12 @@ static int GWPEpon_ProcessIpv4Down(void)
 **************************************************************************/
 static int GWPEpon_ProcessIpv4Up(void)
 {
-    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__)
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
 
     SetProvisioningStatus(EPON_OPER_IPV4_UP);
-
-    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
+    GWPEpon_ProcessLanWanConnect(EPON_OPER_IPV4_UP);	
+    GWPEpon_XconfGetSettings();
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
     return 0;
 }
 
@@ -215,11 +341,11 @@ static int GWPEpon_ProcessIpv4Up(void)
 **************************************************************************/
 static int GWPEpon_ProcessIpv6Down(void)
 {
-    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__)
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
 
     SetProvisioningStatus(EPON_OPER_IPV6_DOWN);
-
-    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
+    GWPEpon_ProcessLanWanConnect(EPON_OPER_IPV6_DOWN);	
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
     return 0;
 }
 
@@ -231,113 +357,303 @@ static int GWPEpon_ProcessIpv6Down(void)
 **************************************************************************/
 static int GWPEpon_ProcessIpv6Up(void)
 {
-    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__)
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
 
     SetProvisioningStatus(EPON_OPER_IPV6_UP);
-
-    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
+    GWPEpon_ProcessLanWanConnect(EPON_OPER_IPV6_UP);		
+    GWPEpon_XconfGetSettings();
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
     return 0;
 }
 
-static int GWPEpon_ProcessLanWanConnect()
+static int IsValidIpPrefMode(EPON_IpProvMode mode)
 {
-    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__)
-		
-    int prov_mode = GWPEpon_SysCfgGetInt("gw_prov_mode");
-    int factory_mode = GWPEpon_SysCfgGetInt("factory_mode");
-    if((factory_mode == 1) ||(prov_mode == 1)) /* 0 = Factory mode and 1 = provisioned mode */
+    int retval = 0;
+    if (mode != IpProvModeNone) 
     {
-        system("sh /usr/ccsp/lan_handler.sh lan_wan_connect"); 
+        if ((mode == IpProvModeIpv6Only) || (mode == IpProvModeDualStack) || 
+            (mode == IpProvModeIpv4DualStack) || (mode == IpProvModeIpv6DualStack))
+        {
+            retval = 1;
+        }
+    }
+
+    return retval;	
+}
+
+static int GWPEpon_ProcessWANIpPref()
+{
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
+    EPON_IpProvMode curRouterIpMode = (EPON_IpProvMode) GWPEpon_SyseventGetInt("cur_router_ip_mode");
+
+    if (curRouterIpMode == IpProvModeHonor)
+    {    	
+        int val = 0;
+        EPON_IpProvMode wan6_ippref = IpProvModeNone;
+        EPON_IpProvMode wan4_ippref = IpProvModeNone;
+        EPON_IpProvMode routerIpMode = IpProvModeNone;
+    
+        val = GWPEpon_SyseventGetInt("wan6_ippref");
+        if (val > 0)
+            wan6_ippref = (EPON_IpProvMode) val;
+		
+        GWPROVEPONLOG(INFO, "wan6_ippref=%d\n",wan6_ippref);
+		
+        val = GWPEpon_SyseventGetInt("wan4_ippref");
+        if (val > 0)
+            wan4_ippref = (EPON_IpProvMode) val;
+		
+        GWPROVEPONLOG(INFO, "wan4_ippref=%d\n",wan4_ippref);
+
+        if(IsValidIpPrefMode(wan4_ippref))
+            routerIpMode = wan4_ippref;
+		
+        if(IsValidIpPrefMode(wan6_ippref))
+            routerIpMode = wan6_ippref;
+	
+        GWPROVEPONLOG(INFO, "ippref routerIpMode=%d\n",routerIpMode);
+
+        if (routerIpMode != IpProvModeNone)
+            GWPEpon_ProcessIPProvisioning(routerIpMode, 0);
     }
     else
     {
-       GWPROVEPONLOG(WARNING,"Refusing to allow LAN ACCESS to WAN on prov_mode %d\n",prov_mode);
+        GWPROVEPONLOG(INFO, "curRouterIpMode=%d, Ignoring iprpef ...\n",curRouterIpMode);
     }
 	
-    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
+    return 0;
+}
+
+static int GWPEpon_ProcessLanWanConnect(EPON_IpProvStatus status)
+{
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
+
+    unsigned char out_val[20];
+    int outbufsz = sizeof(out_val);		
+    int factory_mode = GWPEpon_SysCfgGetInt("factory_mode");
+
+    if(factory_mode)
+        GWPEpon_SysCfgGetStr("gw_prov_mode", out_val, outbufsz);
+    else
+        GWPEpon_SyseventGetStr("cur_gw_prov_mode", out_val, outbufsz);
+	
+    if (!factory_mode && (strcmp(out_val, "provisioned") == 0))
+    {       
+        int ipv6_lan_wan_connect = GWPEpon_SyseventGetInt("ipv6_lan_wan_connect");
+        if (ipv6_lan_wan_connect < 0)
+            ipv6_lan_wan_connect=0;
+     
+        int ipv4_lan_wan_connect = GWPEpon_SyseventGetInt("ipv4_lan_wan_connect");
+        if (ipv4_lan_wan_connect < 0)
+            ipv4_lan_wan_connect=0;
+     
+        switch(status)
+        {
+            case EPON_OPER_IPV6_UP:
+            GWPROVEPONLOG(INFO, "processing IPv6 LanWanConnect\n");	
+                //if(!ipv6_lan_wan_connect)
+                    system("sh /usr/ccsp/lan_handler.sh ipv6_lan_wan_connect");
+     			
+            break;
+         
+            case EPON_OPER_IPV6_DOWN:        			
+
+                GWPROVEPONLOG(INFO, "processing IPv6 LanWanDisconnect\n");	
+                //if(ipv6_lan_wan_connect)
+                    system("sh /usr/ccsp/lan_handler.sh ipv6_lan_wan_disconnect");
+     			
+            break;
+         
+            case EPON_OPER_IPV4_UP:
+     
+     	      GWPROVEPONLOG(INFO, "processing IPv4 LanWanConnect\n");	
+                //if(!ipv4_lan_wan_connect)
+                    system("sh /usr/ccsp/lan_handler.sh ipv4_lan_wan_connect");
+     
+            break;
+     
+            case EPON_OPER_IPV4_DOWN:
+     
+     	      GWPROVEPONLOG(INFO, "processing IPv4 LanWanDisconnect\n");	
+                //if(ipv4_lan_wan_connect)
+                    system("sh /usr/ccsp/lan_handler.sh ipv4_lan_wan_disconnect");
+     
+            break;
+         
+            default:
+            break;
+         }
+    }
+    else
+    {
+       GWPROVEPONLOG(WARNING,"Refusing to allow LAN ACCESS to WAN on gw_prov_mode:%s factory_mode:%d\n",out_val,factory_mode);
+    }
+	
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
     return 0;
 }
 
 static int GWPEpon_ProcessDHCPStart()
 {
-    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__)
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
 		
     system("sh /usr/ccsp/lan_handler.sh dhcp_restart"); 
 	
-    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
-    return 0;
-}
-
-static int GWPEpon_ProcessLanWanDisconnect()
-{
-    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__)
-		
-    system("sh /usr/ccsp/lan_handler.sh lan_wan_disconnect");
-	
-    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
     return 0;
 }
 
 static int GWPEpon_ProcessEthEnable()
 {
-    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__)
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
 		
     system("sh /usr/ccsp/lan_handler.sh eth_enable");
 	
-    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
     return 0;
 }
 
 static int GWPEpon_ProcessEthDisable()
 {
-    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__)
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
 		
     system("sh /usr/ccsp/lan_handler.sh eth_disable");
 	
-    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
     return 0;
 }
 
 static int GWPEpon_ProcessMoCAEnable()
 {
-    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__)
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
 		
     system("sh /usr/ccsp/lan_handler.sh moca_enable");
 	
-    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
     return 0;
 }
 
 static int GWPEpon_ProcessMoCADisable()
 {
-    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__)
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
 		
     system("sh /usr/ccsp/lan_handler.sh moca_disable");
 	
-    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
     return 0;
 }
 
 static int GWPEpon_ProcessWlEnable()
 {
-    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__)
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
 		
     system("sh /usr/ccsp/lan_handler.sh wl_enable");
 	
-    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
     return 0;
 }
 
 static int GWPEpon_ProcessWlDisable()
 {
-    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__)
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
 		
     system("sh /usr/ccsp/lan_handler.sh wl_disable");
 	
-    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
     return 0;
 }
 
+
+static int GWPEpon_ProcessXconfRouterIpMode()
+{
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
+    int factory_mode = GWPEpon_SysCfgGetInt("factory_mode");
+    if (factory_mode)
+    {
+        EPON_IpProvMode routerIpModeOverride = GWPEpon_GetRouterIpMode();
+        EPON_IpProvMode curRouterIpMode = (EPON_IpProvMode) GWPEpon_SyseventGetInt("cur_router_ip_mode");
+
+        if(routerIpModeOverride != curRouterIpMode) {
+            GWPEpon_ProcessIPProvisioning(routerIpModeOverride, 1);
+        }
+        GWPEpon_SysCfgSetInt("factory_mode", 0);
+        GWPEpon_ProcessLanWanReconnect();
+    }
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
+    return 0;
+}
+
+static int GWPEpon_ProcessXconfPoDSeed()
+{
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
+    return 0;
+}
+
+static int GWPEpon_ProcessXconfDstAdj()
+{
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
+    return 0;
+}
+
+static void GWPEpon_ProcessLanWanReconnect()
+{
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
+	
+    int gw_prov_status = 0;
+    gw_prov_status = GWPEpon_SyseventGetInt("gw_prov_status");
+	
+    if (gw_prov_status & 0x00000001)
+        GWPEpon_ProcessLanWanConnect(EPON_OPER_IPV6_UP);
+    else
+        GWPEpon_ProcessLanWanConnect(EPON_OPER_IPV6_DOWN);
+
+    if (gw_prov_status & 0x00000002)
+        GWPEpon_ProcessLanWanConnect(EPON_OPER_IPV4_UP);
+    else
+        GWPEpon_ProcessLanWanConnect(EPON_OPER_IPV4_DOWN);
+	
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
+}
+
+static void GWPEpon_ProcessXconfGwProvMode()
+{
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
+
+    unsigned char out_val[20];
+    int factory_mode = GWPEpon_SysCfgGetInt("factory_mode");
+
+    if(factory_mode)
+    {
+        GWPEpon_SysCfgGetStr("gw_prov_mode", out_val, sizeof(out_val));
+        GWPEpon_SyseventSetStr("cur_gw_prov_mode", out_val, 0);
+    }	
+	
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
+}
+
+static void GWPEpon_ProcessBridgeModeEnable()
+{
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
+    system("sh /usr/ccsp/lan_handler.sh bridge_mode_enable");
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
+}
+
+static void GWPEpon_ProcessBridgeModeDisable()
+{
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
+    system("sh /usr/ccsp/lan_handler.sh bridge_mode_disable");
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
+}
+
+static void GWPEpon_ProcessFirewallRestart()
+{
+GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
+   system("sh /usr/ccsp/lan_handler.sh firewall_restart");
+GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
+}
 /**************************************************************************/
 /*! \fn static STATUS GWPEpon_SyseventGetInt
  **************************************************************************
@@ -349,7 +665,8 @@ int GWPEpon_SyseventGetInt(const char *name)
    unsigned char out_value[20];
    int outbufsz = sizeof(out_value);
 
-   if (!sysevent_get(sysevent_fd_gs, sysevent_token_gs, name, out_value,outbufsz))
+   sysevent_get(sysevent_fd_gs, sysevent_token_gs, name, out_value,outbufsz);
+   if(out_value[0] != '\0')
    {
       return atoi(out_value);
    }
@@ -372,6 +689,20 @@ int GWPEpon_SyseventSetInt(const char *name, int int_value)
    sprintf(value, "%d", int_value);
 
    return sysevent_set(sysevent_fd_gs, sysevent_token_gs, name, value, sizeof(value));
+}
+
+int GWPEpon_SyseventGetStr(const char *name, unsigned char *out_value, int outbufsz)
+{
+    sysevent_get(sysevent_fd_gs, sysevent_token_gs, name, out_value, outbufsz);
+    if(out_value[0] != '\0')
+        return 0;		
+    else
+        return -1;		
+}
+
+int GWPEpon_SyseventSetStr(const char *name, unsigned char *value, int bufsz)
+{
+    return sysevent_set(sysevent_fd_gs, sysevent_token_gs, name, value, bufsz);
 }
 
 
@@ -406,11 +737,23 @@ static int GWPEpon_SysCfgGetInt(const char *name)
 static int GWPEpon_SysCfgSetInt(const char *name, int int_value)
 {
    unsigned char value[20];
+   int retval=0;
    sprintf(value, "%d", int_value);
+   retval = syscfg_set(NULL, name, value);
+   syscfg_commit();
 
-   return syscfg_set(NULL, name, value);
+   return retval;
 }
 
+static int GWPEpon_SysCfgGetStr(const char *name, unsigned char *out_value, int outbufsz)
+{
+   return syscfg_get(NULL, name, out_value, outbufsz);
+}
+
+static int GWPEpon_SysCfgSetStr(const char *name, unsigned char *str_value)
+{
+   return syscfg_set(NULL, name, str_value);
+}
 
 /**************************************************************************/
 /*! \fn static void GWPEpon_StopIPProvisioning
@@ -420,15 +763,14 @@ static int GWPEpon_SysCfgSetInt(const char *name, int int_value)
  **************************************************************************/
 static void GWPEpon_StopIPProvisioning()
 {
-    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__)
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
+	
+    GWPEpon_StopIPv4Service();
+    GWPEpon_StopIPv6Service();
 
-    system("systemctl stop dibbler.service");
-    system("rm /tmp/.start_ipv4"); 
-    system("systemctl stop udhcp.service");
-    SetProvisioningStatus(EPON_OPER_NONE);
-
-    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
 }
+
 /**************************************************************************/
 /*! \fn static void GWPEpon_StartIPProvisioning
  **************************************************************************
@@ -437,62 +779,56 @@ static void GWPEpon_StopIPProvisioning()
  **************************************************************************/
 static void GWPEpon_StartIPProvisioning()
 {
-    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__)
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
 
-    factory_mode = GWPEpon_SysCfgGetInt("factory_mode");
-    routerIpModeOverride = GWPEpon_SysCfgGetInt("router_ip_mode_override");
-
-    int prov_status = GWPEpon_SyseventGetInt("prov_status");	
-    GWPROVEPONLOG(INFO, "prov_status=%d routerIpModeOverride=%d\n",prov_status, routerIpModeOverride)
+    int factory_mode = GWPEpon_SysCfgGetInt("factory_mode");
+    EPON_IpProvMode routerIpModeOverride = IpProvModeHonor;
+	
     if (factory_mode) //First IP Initialization (Factory reset or Factory unit)
     {  
+        GWPROVEPONLOG(INFO, "In factory mode IP Initialization\n");
         routerIpModeOverride = IpProvModeHonor;
-
-	 //Attempt address acquisition in IP-PREF mode
-	prov_status = EPON_OPER_NONE;
     }
-//    else //Subsequent IP Initialization
-    {  
-        if (routerIpModeOverride == IpProvModeIpv6Only)
-        {
-            //system("systemctl start dibbler.service");
-            if (!(prov_status & EPON_OPER_IPV6_UP))
-            {
-                //dibbler (Ipv6) 
-                system("touch /tmp/.start_ipv6");
-                system("systemctl restart dibbler.service");
-            }
-        }
-        else if(routerIpModeOverride == IpProvModeDualStack)
-        {
-            if (!(prov_status & EPON_OPER_IPV6_UP))
-            {
-                system("touch /tmp/.start_ipv6");
-                system("systemctl restart dibbler.service");
-            }
-
-            if (!(prov_status & EPON_OPER_IPV4_UP))
-            {
-                system("touch /tmp/.start_ipv4");
-                system("systemctl restart udhcp.service");
-            }
-        }
-        else if(routerIpModeOverride == IpProvModeHonor)
-        {
-         //check with scott : consider DHCP IP PREF
-            if (!(prov_status & EPON_OPER_IPV6_UP))
-            {
-                system("touch /tmp/.start_ipv6");
-                system("systemctl restart dibbler.service");
-            }
-
-            if (!(prov_status & EPON_OPER_IPV4_UP))
-            {
-                system("touch /tmp/.start_ipv4");
-                system("systemctl restart udhcp.service");            
-            }
-        }
+    else
+    {
+        GWPROVEPONLOG(INFO, "In Subsequent IP Initialization\n");
+        routerIpModeOverride = GWPEpon_GetRouterIpMode();
     }
+
+    unsigned char out_val[20];
+    GWPEpon_SysCfgGetStr("gw_prov_mode", out_val, sizeof(out_val));
+    GWPEpon_SyseventSetStr("cur_gw_prov_mode", out_val, 0);
+
+    GWPEpon_ProcessIPProvisioning(routerIpModeOverride, 1);
+	
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
+}
+
+static void GWPEpon_ProcessIPProvisioning(EPON_IpProvMode routerIpMode, int update_db)
+{
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
+
+    if(update_db)	
+        GWPEpon_SyseventSetInt("cur_router_ip_mode", (int) routerIpMode);	
+	
+    GWPROVEPONLOG(INFO, "routerIpMode=%d\n", routerIpMode);
+
+    if (routerIpMode == IpProvModeIpv6Only)
+    {
+        GWPEpon_StartIPv6Service();
+        GWPEpon_StopIPv4Service();		
+    }
+    else if( (routerIpMode == IpProvModeDualStack) || (routerIpMode == IpProvModeIpv4DualStack) || (routerIpMode == IpProvModeIpv6DualStack))
+    {
+        GWPEpon_StartIPv6Service();
+        GWPEpon_StartIPv4Service();
+    }
+    else if(routerIpMode == IpProvModeHonor)
+    {
+        GWPEpon_StartIPv6Service();
+        GWPEpon_StartIPv4Service();
+    }
+	
     GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
 }
 
@@ -509,16 +845,22 @@ static void *GWPEpon_sysevent_handler(void *data)
     async_id_t epon_ifstatus_asyncid;
     async_id_t ipv4_status_asyncid;
     async_id_t ipv6_status_asyncid;
-    async_id_t ipv4_ippref_asyncid;
+    async_id_t wan4_ippref_asyncid;
+    async_id_t wan6_ippref_asyncid;
     async_id_t ipv6_ippref_asyncid;
     async_id_t ipv4_timeoffset_asyncid;
     async_id_t ipv6_timeoffset_asyncid;	
-    async_id_t lan_wan_connect_asyncid;
     async_id_t lan_restart_connect_asyncid;
     async_id_t dhcp_server_status_asyncid;
     async_id_t eth_status_asyncid;
     async_id_t moca_status_asyncid;
     async_id_t wl_status_asyncid;
+    async_id_t xconf_router_ip_mode_asyncid;
+    async_id_t xconf_pod_seed_asyncid;
+    async_id_t xconf_dst_adj_asyncid;
+    async_id_t xconf_gw_prov_mode_asyncid;
+    async_id_t bridge_mode_asyncid;
+    async_id_t firewall_restart_asyncid;
     static unsigned char firstBoot=1;
 
     sysevent_set_options(sysevent_fd, sysevent_token, "epon_ifstatus", TUPLE_FLAG_EVENT);
@@ -527,8 +869,8 @@ static void *GWPEpon_sysevent_handler(void *data)
     sysevent_set_options(sysevent_fd, sysevent_token, "ipv4-status", TUPLE_FLAG_EVENT);
     sysevent_setnotification(sysevent_fd, sysevent_token, "ipv4-status",  &ipv4_status_asyncid);
 
-    sysevent_set_options(sysevent_fd, sysevent_token, "ipv4-ip-pref", TUPLE_FLAG_EVENT);
-    sysevent_setnotification(sysevent_fd, sysevent_token, "ipv4-ip-pref",  &ipv4_ippref_asyncid);
+    sysevent_set_options(sysevent_fd, sysevent_token, "wan4_ippref", TUPLE_FLAG_EVENT);
+    sysevent_setnotification(sysevent_fd, sysevent_token, "wan4_ippref",  &wan4_ippref_asyncid);
 
     sysevent_set_options(sysevent_fd, sysevent_token, "ipv4-timeoffset", TUPLE_FLAG_EVENT);
     sysevent_setnotification(sysevent_fd, sysevent_token, "ipv4-timeoffset",  &ipv4_timeoffset_asyncid);
@@ -536,17 +878,11 @@ static void *GWPEpon_sysevent_handler(void *data)
     sysevent_set_options(sysevent_fd, sysevent_token, "ipv6-status", TUPLE_FLAG_EVENT);
     sysevent_setnotification(sysevent_fd, sysevent_token, "ipv6-status",  &ipv6_status_asyncid);
 
-    sysevent_set_options(sysevent_fd, sysevent_token, "ipv6-ip-pref", TUPLE_FLAG_EVENT);
-    sysevent_setnotification(sysevent_fd, sysevent_token, "ipv6-ip-pref",  &ipv6_ippref_asyncid);
+    sysevent_set_options(sysevent_fd, sysevent_token, "wan6_ippref", TUPLE_FLAG_EVENT);
+    sysevent_setnotification(sysevent_fd, sysevent_token, "wan6_ippref",  &wan6_ippref_asyncid);
 
     sysevent_set_options(sysevent_fd, sysevent_token, "ipv6-timeoffset", TUPLE_FLAG_EVENT);
     sysevent_setnotification(sysevent_fd, sysevent_token, "ipv6-timeoffset",  &ipv6_timeoffset_asyncid);
-
-    sysevent_set_options(sysevent_fd, sysevent_token, "lan_wan_connect", TUPLE_FLAG_EVENT);
-    sysevent_setnotification(sysevent_fd, sysevent_token, "lan_wan_connect",  &lan_wan_connect_asyncid);
-
-    sysevent_set_options(sysevent_fd, sysevent_token, "lan-restart", TUPLE_FLAG_EVENT);
-    sysevent_setnotification(sysevent_fd, sysevent_token, "lan-restart",  &lan_restart_connect_asyncid);
 
     sysevent_set_options(sysevent_fd, sysevent_token, "dhcp_server-restart", TUPLE_FLAG_EVENT);
     sysevent_setnotification(sysevent_fd, sysevent_token, "dhcp_server-restart",  &dhcp_server_status_asyncid);
@@ -560,8 +896,28 @@ static void *GWPEpon_sysevent_handler(void *data)
     sysevent_set_options(sysevent_fd, sysevent_token, "wl_enabled", TUPLE_FLAG_EVENT);
     sysevent_setnotification(sysevent_fd, sysevent_token, "wl_enabled",  &wl_status_asyncid);
 
-    sysevent_set_options(sysevent_fd_gs, sysevent_token, "epon_prov_status", TUPLE_FLAG_EVENT);
-    sysevent_set_options(sysevent_fd_gs, sysevent_token, "prov_status", TUPLE_FLAG_EVENT);
+    sysevent_set_options(sysevent_fd, sysevent_token, "xconf_router_ip_mode", TUPLE_FLAG_EVENT);
+    sysevent_setnotification(sysevent_fd, sysevent_token, "xconf_router_ip_mode",  &xconf_router_ip_mode_asyncid);
+
+    sysevent_set_options(sysevent_fd, sysevent_token, "xconf_pod_seed", TUPLE_FLAG_EVENT);
+    sysevent_setnotification(sysevent_fd, sysevent_token, "xconf_pod_seed",  &xconf_pod_seed_asyncid);
+
+    sysevent_set_options(sysevent_fd, sysevent_token, "xconf_dst_adj", TUPLE_FLAG_EVENT);
+    sysevent_setnotification(sysevent_fd, sysevent_token, "xconf_dst_adj",  &xconf_dst_adj_asyncid);
+
+    sysevent_set_options(sysevent_fd, sysevent_token, "xconf_gw_prov_mode", TUPLE_FLAG_EVENT);
+    sysevent_setnotification(sysevent_fd, sysevent_token, "xconf_gw_prov_mode",  &xconf_gw_prov_mode_asyncid);
+
+    sysevent_set_options(sysevent_fd, sysevent_token, "bridge_mode", TUPLE_FLAG_EVENT);
+    sysevent_setnotification(sysevent_fd, sysevent_token, "bridge_mode",  &bridge_mode_asyncid);
+
+    sysevent_set_options(sysevent_fd_gs, sysevent_token, "gw_prov_status", TUPLE_FLAG_EVENT);
+    sysevent_set_options(sysevent_fd_gs, sysevent_token, "gw_prov_status_str", TUPLE_FLAG_EVENT);
+    sysevent_set_options(sysevent_fd_gs, sysevent_token, "cur_gw_prov_mode", TUPLE_FLAG_EVENT);
+    sysevent_set_options(sysevent_fd_gs, sysevent_token, "cur_router_ip_mode", TUPLE_FLAG_EVENT);
+	
+    sysevent_set_options(sysevent_fd, sysevent_token, "firewall-restart", TUPLE_FLAG_EVENT);
+    sysevent_setnotification(sysevent_fd, sysevent_token, "firewall-restart",  &firewall_restart_asyncid);
 
    for (;;)
    {
@@ -575,7 +931,7 @@ static void *GWPEpon_sysevent_handler(void *data)
         {
            /* In case we missed an event notification before the thread starts */
            strcpy(name,"epon_ifstatus");
-           err = sysevent_get(sysevent_fd_gs, sysevent_token_gs, name, val, vallen);
+           err = GWPEpon_SyseventGetStr(name, val, vallen);
            firstBoot = 0;
         }
         else
@@ -622,32 +978,19 @@ static void *GWPEpon_sysevent_handler(void *data)
                     GWPEpon_ProcessIpv6Down();
                 }
             }
-            else if (strcmp(name, "ipv4-ip-pref")==0)
+            else if (strcmp(name, "wan4_ippref")==0)
             {
+                GWPEpon_ProcessWANIpPref();            
             }
-            else if (strcmp(name, "ipv6-ip-pref")==0)
+            else if (strcmp(name, "wan6_ippref")==0)
             {
+                GWPEpon_ProcessWANIpPref();           
             }		
             else if (strcmp(name, "ipv4-timeoffset")==0)
             {
             }
             else if (strcmp(name, "ipv6-timeoffset")==0)
             {
-            }
-            else if (strcmp(name, "lan_wan_connect")==0)
-            {
-                if (strcmp(val, "1")==0)
-                {
-                    GWPEpon_ProcessLanWanConnect();
-                }
-                else if (strcmp(val, "0")==0)
-                {
-                    GWPEpon_ProcessLanWanDisconnect();
-                }
-            }
-            else if (strcmp(name, "lan-restart")==0)
-            {
-                GWPEpon_ProcessLanWanConnect();
             }
             else if (strcmp(name, "dhcp_server-restart")==0)
             {
@@ -686,14 +1029,53 @@ static void *GWPEpon_sysevent_handler(void *data)
                     GWPEpon_ProcessWlDisable();
                 }
             }
+            else if (strcmp(name, "xconf_router_ip_mode")==0)
+            {
+                if (strcmp(val, "1")==0)
+                {
+                    GWPEpon_ProcessXconfRouterIpMode();
+                }
+            }
+            else if (strcmp(name, "xconf_pod_seed")==0)
+            {
+                if (strcmp(val, "1")==0)
+                {
+                    GWPEpon_ProcessXconfPoDSeed();
+                }
+            }
+            else if (strcmp(name, "xconf_dst_adj")==0)
+            {
+                if (strcmp(val, "1")==0)
+                {
+                    GWPEpon_ProcessXconfDstAdj();
+                }
+            }
+            else if (strcmp(name, "xconf_gw_prov_mode")==0)
+            {
+                if (strcmp(val, "1")==0)
+                {
+                    GWPEpon_ProcessXconfGwProvMode();
+                }
+            }
+            else if (strcmp(name, "bridge_mode")==0)
+            {
+                if (strcmp(val, "1")==0)
+                {
+                    GWPEpon_ProcessBridgeModeEnable();
+                }
+                else if (strcmp(val, "0")==0)
+                {
+                    GWPEpon_ProcessBridgeModeDisable();
+                }
+            }
+            else if (strcmp(name, "firewall-restart")==0)
+            {
+                GWPEpon_ProcessFirewallRestart();
+            }
             else
             {
                GWPROVEPONLOG(WARNING, "undefined event %s \n",name)
-            }
-			
-            // committing syscfg values
-            GWPROVEPONLOG(INFO, "committing syscfg values\n")
-            syscfg_commit();
+            }			
         }
     }
 
@@ -704,17 +1086,10 @@ static void *GWPEpon_sysevent_handler(void *data)
 static void  notifySysEvents()
 {
     GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__)
-    unsigned char out_value[20];
-    int outbufsz = sizeof(out_value);
-
-    if (GWPEpon_SysCfgGetInt("lan_wan_connect") == 1)
-    {
-        sysevent_set(sysevent_fd_gs, sysevent_token_gs, "lan_wan_connect", "1", 0);
-    }	
 
     if (GWPEpon_SysCfgGetInt("dhcp_server_enabled") == 1)
     {
-        sysevent_set(sysevent_fd_gs, sysevent_token_gs, "dhcp_server-restart", "1", 0);
+        GWPEpon_SyseventSetStr("dhcp_server-restart", "1", 0);
     }	
 
     GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
@@ -722,45 +1097,72 @@ static void  notifySysEvents()
 
 static void GWPEpon_SetDefaults()
 {
-    char buf[10];
+    unsigned char buf[10];
+    unsigned char out_val[20];
+    int outbufsz = sizeof(out_val);
+    int update_db = 0;
+	
     GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__)
 
+    //Set default syscfg entries
     if (GWPEpon_SysCfgGetInt("factory_mode") < 0)
     {
-        GWPROVEPONLOG(INFO, "setting default factory mode\n")
-        GWPEpon_SysCfgSetInt("factory_mode", 1);   
+        GWPROVEPONLOG(INFO, "setting default factory mode to 1\n");
+        GWPEpon_SysCfgSetInt("factory_mode", 1);
     }
 
-    if (GWPEpon_SysCfgGetInt("router_ip_mode_override") < 0)
+    if(GWPEpon_SysCfgGetInt("factory_mode") == 1)
     {
-        GWPROVEPONLOG(INFO, "setting default router ip override mode\n")
-        GWPEpon_SysCfgSetInt("router_ip_mode_override", 2);   
+        GWPEpon_SysCfgSetStr("router_ip_mode_override", "Honor");
+        GWPEpon_SysCfgSetStr("pod_seed", "Interface disabled");    
+        GWPEpon_SysCfgSetStr("dst_adj", "Off");
+        GWPEpon_SysCfgSetStr("gw_prov_mode", "de-provisioned");
     }
-   
-    if (GWPEpon_SyseventGetInt ("prov_status") < 0)
+    else
     {
-        GWPROVEPONLOG(INFO, "setting default prov_status\n")
-        GWPEpon_SyseventSetInt("prov_status",0);
+        out_val[0]='\0';
+        if(GWPEpon_SysCfgGetStr("pod_seed", out_val, outbufsz))
+        {
+            GWPROVEPONLOG(INFO, "setting default PoD seed to Interface disabled\n");
+            GWPEpon_SysCfgSetStr("pod_seed", "Interface disabled");
+            update_db = 1;
+        }
+    
+        out_val[0]='\0';
+        if(GWPEpon_SysCfgGetStr("router_ip_mode_override", out_val, outbufsz))
+        {
+            GWPROVEPONLOG(INFO, "setting default router IP mode override to Honor\n");
+            GWPEpon_SysCfgSetStr("router_ip_mode_override", "Honor");
+            update_db = 1;
+        }
+    
+        out_val[0]='\0';
+        if(GWPEpon_SysCfgGetStr("dst_adj", out_val, outbufsz))
+        {
+            GWPROVEPONLOG(INFO, "setting default dst_adj to Off\n");
+            GWPEpon_SysCfgSetStr("dst_adj", "Off");
+            update_db = 1;
+        }
+    
+        out_val[0]='\0';
+        if (GWPEpon_SysCfgGetStr("gw_prov_mode", out_val, outbufsz))
+        {
+            GWPROVEPONLOG(INFO, "setting default gw prov mode to de-provisioned\n");
+            GWPEpon_SysCfgSetStr("gw_prov_mode", "de-provisioned");
+            update_db = 1;
+        }    
     }
 
-    if (GWPEpon_SysCfgGetInt("gw_prov_mode") < 0)
+    if(update_db)
+        syscfg_commit();
+
+    //Set default sysevent entries
+    buf[0]='\0';
+    if (GWPEpon_SyseventGetStr("epon_ifstatus", buf, sizeof(buf)) < 0)
     {
-        GWPROVEPONLOG(INFO, "setting default gw prov mode to unprovisioned\n")
-        GWPEpon_SysCfgSetInt("gw_prov_mode", 0);   
+        GWPEpon_SyseventSetStr("epon_ifstatus", "up", 0);
     }
-   
-#if 0
-    sysevent_get(sysevent_fd_gs, sysevent_token_gs, "epon_ifname", buf, sizeof(buf));
-    if (buf[0] != '\0')
-    {
-        sysevent_set(sysevent_fd_gs, sysevent_token_gs, "epon_ifname", IF_WANBRIDGE, 0);
-    }
-#endif
-    sysevent_get(sysevent_fd_gs, sysevent_token_gs, "epon_ifstatus", buf, sizeof(buf));
-    if (buf[0] != '\0')
-    {
-        sysevent_set(sysevent_fd_gs, sysevent_token_gs, "epon_ifstatus", "up", 0);
-    }
+	
     GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__)
 }
 
@@ -771,38 +1173,38 @@ static bool GWPEpon_Register_sysevent()
     int retry = 0;
     GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__)
 
-     do
-    	{
-    
-    sysevent_fd = sysevent_open("127.0.0.1", SE_SERVER_WELL_KNOWN_PORT, SE_VERSION, "gw_prov_epon", &sysevent_token);
-    if (sysevent_fd < 0)
+    do
     {
-        GWPROVEPONLOG(ERROR, "gw_prov_epon failed to register with sysevent daemon\n");
-        status = false;
-    }
-    else
-    {  
-        GWPROVEPONLOG(INFO, "gw_prov_epon registered with sysevent daemon successfully\n");
-        status = true;
-    }
+        sysevent_fd = sysevent_open("127.0.0.1", SE_SERVER_WELL_KNOWN_PORT, SE_VERSION, "gw_prov_epon", &sysevent_token);
+        if (sysevent_fd < 0)
+        {
+            GWPROVEPONLOG(ERROR, "gw_prov_epon failed to register with sysevent daemon\n");
+            status = false;
+        }
+        else
+        {  
+            GWPROVEPONLOG(INFO, "gw_prov_epon registered with sysevent daemon successfully\n");
+            status = true;
+        }
+        
+        //Make another connection for gets/sets
+        sysevent_fd_gs = sysevent_open("127.0.0.1", SE_SERVER_WELL_KNOWN_PORT, SE_VERSION, "gw_prov_epon-gs", &sysevent_token_gs);
+        if (sysevent_fd_gs < 0)
+        {
+            GWPROVEPONLOG(ERROR, "gw_prov_epon-gs failed to register with sysevent daemon\n");
+            status = false;
+        }
+        else
+        {
+            GWPROVEPONLOG(INFO, "gw_prov_epon-gs registered with sysevent daemon successfully\n");
+            status = true;
+        }
 
-    //Make another connection for gets/sets
-    sysevent_fd_gs = sysevent_open("127.0.0.1", SE_SERVER_WELL_KNOWN_PORT, SE_VERSION, "gw_prov_epon-gs", &sysevent_token_gs);
-    if (sysevent_fd_gs < 0)
-    {
-        GWPROVEPONLOG(ERROR, "gw_prov_epon-gs failed to register with sysevent daemon\n");
-        status = false;
-    }
-    else
-    {
-        GWPROVEPONLOG(INFO, "gw_prov_epon-gs registered with sysevent daemon successfully\n");
-        status = true;
-    }
-	if(status == false) {
-		system("/usr/bin/syseventd");
-            sleep(5);
-		}
-    	}while((status == false) && (retry++ < max_retries));
+        if(status == false) {
+        	system("/usr/bin/syseventd");
+                sleep(5);
+        }
+    }while((status == false) && (retry++ < max_retries));
 
 
     if (status != false)
@@ -858,11 +1260,11 @@ static bool checkIfAlreadyRunning(const char* name)
     GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__)
     bool status = true;
 	
-    FILE *fp = fopen("/tmp/.gwprovepon.pid", "r"); 	
+    FILE *fp = fopen("/tmp/.gwprovepon.pid", "r");
     if (fp == NULL) 
     {
         GWPROVEPONLOG(ERROR, "File /tmp/.gwprovepon.pid doesn't exist\n")
-        FILE *pfp = fopen("/tmp/.gwprovepon.pid", "w"); 			
+        FILE *pfp = fopen("/tmp/.gwprovepon.pid", "w");
         if (pfp == NULL) 
         {
             GWPROVEPONLOG(ERROR, "Error in creating file /tmp/.gwprovepon.pid\n")
