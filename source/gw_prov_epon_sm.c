@@ -30,6 +30,7 @@
 #include <pthread.h>
 #include "stdbool.h"
 #include "gw_prov_epon.h"
+#include "mso_mgmt_hal.h"
 
 /**************************************************************************/
 /*      LOCAL VARIABLES:                                                  */
@@ -586,7 +587,10 @@ static int GWPEpon_ProcessXconfRouterIpMode()
 
 static int GWPEpon_ProcessXconfPoDSeed()
 {
+    unsigned char out_val[20];
     GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
+    GWPEpon_SysCfgGetStr("pod_seed", out_val, sizeof(out_val));
+    mso_set_pod_seed(out_val);
     GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
     return 0;
 }
