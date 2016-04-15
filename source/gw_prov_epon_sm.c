@@ -658,6 +658,33 @@ GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
    system("sh /usr/ccsp/lan_handler.sh firewall_restart");
 GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
 }
+
+static void GWPEpon_ProcessWanTimezone()
+{
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
+    unsigned char timezone_hex[30], name[25], timezone_ascii[30];
+    int namelen = sizeof(name);
+    int vallen = sizeof(timezone_hex);
+    unsigned int ch;
+    int i, j, err;
+    strcpy(name, "wan_timezone");
+    err = GWPEpon_SyseventGetStr(name, timezone_hex, vallen);
+    if (err < 0) {
+        GWPROVEPONLOG(INFO, "Timezone does not exists\n");
+    }
+    else {
+        for(i=0; sscanf((const char*)&timezone_hex[i], "%2x", &ch) == 1; i += 2)
+        {
+             timezone_ascii[j++] = ch; 
+        }
+        timezone_ascii[j] = 0;
+        unsigned char cmdLine[50];
+        sprintf(cmdLine, "timedatectl set-timezone %s", timezone_ascii);
+        system(cmdLine);
+    }
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
+}
+
 /**************************************************************************/
 /*! \fn static STATUS GWPEpon_SyseventGetInt
  **************************************************************************
@@ -865,6 +892,7 @@ static void *GWPEpon_sysevent_handler(void *data)
     async_id_t xconf_gw_prov_mode_asyncid;
     async_id_t bridge_mode_asyncid;
     async_id_t firewall_restart_asyncid;
+    async_id_t wan_timezone_asyncid;
     static unsigned char firstBoot=1;
 
     sysevent_set_options(sysevent_fd, sysevent_token, "epon_ifstatus", TUPLE_FLAG_EVENT);
@@ -923,6 +951,8 @@ static void *GWPEpon_sysevent_handler(void *data)
     sysevent_set_options(sysevent_fd, sysevent_token, "firewall-restart", TUPLE_FLAG_EVENT);
     sysevent_setnotification(sysevent_fd, sysevent_token, "firewall-restart",  &firewall_restart_asyncid);
 
+    sysevent_set_options(sysevent_fd, sysevent_token, "wan_timezone", TUPLE_FLAG_EVENT);
+    sysevent_setnotification(sysevent_fd, sysevent_token, "wan_timezone",  &wan_timezone_asyncid);
    for (;;)
    {
         unsigned char name[25], val[42];
@@ -1075,6 +1105,10 @@ static void *GWPEpon_sysevent_handler(void *data)
             else if (strcmp(name, "firewall-restart")==0)
             {
                 GWPEpon_ProcessFirewallRestart();
+            }
+            else if (strcmp(name, "wan_timezone") == 0)
+            {
+                GWPEpon_ProcessWanTimezone();
             }
             else
             {
