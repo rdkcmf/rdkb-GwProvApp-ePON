@@ -40,6 +40,7 @@ static token_t sysevent_token;
 static int sysevent_fd_gs;
 static token_t sysevent_token_gs;
 static pthread_t sysevent_tid;
+static int erouter_reset_count;
 
 #define INFO  0
 #define WARNING  1
@@ -984,6 +985,10 @@ static void *GWPEpon_sysevent_handler(void *data)
                 if (strcmp(val, "up")==0)
                 {
                     GWPEpon_ProcessIfUp();
+
+                    erouter_reset_count += 1;
+                    GWPEpon_SyseventSetInt("erouter_reset_count", erouter_reset_count);
+                    GWPROVEPONLOG(INFO, "erouter_reset_count=%d\n",erouter_reset_count)
                 }
                 else if (strcmp(val, "down")==0)
                 {
