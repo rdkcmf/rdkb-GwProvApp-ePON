@@ -73,6 +73,9 @@ static void GWPEpon_ProcessLanWanReconnect();
 static int GWPEpon_ProcessLanWanConnect(EPON_IpProvStatus status);
 static int GWPEpon_ProcessIpv4Down(void);
 static int GWPEpon_ProcessIpv6Down(void);
+static void GWPEpon_ProcessIpv4Timeoffset();
+static void GWPEpon_ProcessIpv6Timeoffset();
+static void GWPEpon_SetWanTimeoffset(unsigned char *time_offset_str);
 static int GWPEpon_SysCfgSetInt(const char *name, int int_value);
 static int GWPEpon_SysCfgGetInt(const char *name);
 static int GWPEpon_SysCfgGetStr(const char *name, unsigned char *out_value, int outbufsz);
@@ -599,6 +602,8 @@ static int GWPEpon_ProcessXconfPoDSeed()
 static int GWPEpon_ProcessXconfDstAdj()
 {
     GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
+    GWPEpon_ProcessIpv4Timeoffset();
+    GWPEpon_ProcessIpv6Timeoffset();
     GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
     return 0;
 }
@@ -660,29 +665,179 @@ GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
 GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
 }
 
-static void GWPEpon_ProcessWanTimezone()
+static void GWPEpon_ProcessIpv6Timezone()
 {
     GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
-    unsigned char timezone_hex[30], name[25], timezone_ascii[30];
-    int namelen = sizeof(name);
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
+}
+
+static void GWPEpon_ProcessIpv4Timezone()
+{
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
+    unsigned char timezone_hex[30], timezone_ascii[30];
     int vallen = sizeof(timezone_hex);
     unsigned int ch;
-    int i, j, err;
-    strcpy(name, "wan_timezone");
-    err = GWPEpon_SyseventGetStr(name, timezone_hex, vallen);
-    if (err < 0) {
-        GWPROVEPONLOG(INFO, "Timezone does not exists\n");
+    int i, j;
+    timezone_hex[0]='\0';
+    if ((GWPEpon_SyseventGetStr("ipv6-timeoffset", timezone_hex, vallen) < 0) && 
+                     (GWPEpon_SyseventGetStr("ipv6_timezone", timezone_hex, vallen) < 0))
+    {
+       timezone_hex[0]='\0';
+       if (GWPEpon_SyseventGetStr("ipv4_timezone", timezone_hex, vallen) < 0) {
+           GWPROVEPONLOG(INFO, "Timezone does not exists\n");
+           strcpy(timezone_ascii, "UTC");
+       }
+       else {
+           for(i=0; sscanf((const char*)&timezone_hex[i], "%2x", &ch) == 1; i += 2)
+           {
+               timezone_ascii[j++] = ch; 
+           }
+           timezone_ascii[j] = 0;
+       }
+       unsigned char cmdLine[50];
+       sprintf(cmdLine, "timedatectl set-timezone %s", timezone_ascii);
+       system(cmdLine);
     }
-    else {
-        for(i=0; sscanf((const char*)&timezone_hex[i], "%2x", &ch) == 1; i += 2)
+    else
+    {
+        GWPROVEPONLOG(INFO, "Ignore ipv4-timezone as ipv6-timezone or ipv6-timeoffset  exists\n");
+    }
+
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
+}
+
+static void GWPEpon_ProcessIpv4Timeoffset()
+{
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
+
+    unsigned char value[20];
+    int vallen = sizeof(value);
+    value[0]='\0';
+		
+    if (GWPEpon_SyseventGetStr("ipv4_timezone", value, vallen) < 0)
+    {
+        value[0]='\0';
+        if ((GWPEpon_SyseventGetStr("ipv6-timeoffset", value, vallen) < 0) && 
+                     (GWPEpon_SyseventGetStr("ipv6_timezone", value, vallen) < 0))
         {
-             timezone_ascii[j++] = ch; 
+            GWPROVEPONLOG(INFO, "Apply ipv4-timeoffset\n");
+    
+            value[0]='\0';
+            if (GWPEpon_SyseventGetStr("ipv4-timeoffset", value, vallen) < 0)
+            {
+                GWPROVEPONLOG(WARNING, "ipv4-timeoffset does not exists\n");
+            }
+            else
+            {
+                GWPEpon_SetWanTimeoffset(value);  
+            }
         }
-        timezone_ascii[j] = 0;
-        unsigned char cmdLine[50];
-        sprintf(cmdLine, "timedatectl set-timezone %s", timezone_ascii);
-        system(cmdLine);
+        else 
+        {
+            GWPROVEPONLOG(INFO, "Ignore ipv4-timeoffset as ipv6_timezone/ipv6-timeoffset already applied\n");
+        } 
     }
+    else
+    {
+        GWPROVEPONLOG(INFO, "Ignore ipv4-timeoffset as ipv4-timezone exists\n");
+    }
+
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
+}
+
+static void GWPEpon_ProcessIpv6Timeoffset()
+{
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
+
+    unsigned char value[20];
+    int vallen = sizeof(value);	
+    value[0]='\0';
+
+    if (GWPEpon_SyseventGetStr("ipv6_timezone", value, vallen) < 0)
+    {
+        value[0]='\0';
+        GWPROVEPONLOG(INFO, "Apply ipv6-timeoffset\n");   
+        if (GWPEpon_SyseventGetStr("ipv6-timeoffset", value, vallen) < 0)
+        {
+            GWPROVEPONLOG(WARNING, "ipv6-timeoffset does not exists\n");
+        }
+        else 
+        {
+            GWPEpon_SetWanTimeoffset(value);
+        }
+    }
+    else
+        GWPROVEPONLOG(INFO, "Ignore ipv6-timeoffset as ipv6-timezone exists\n");
+
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
+}
+
+static void GWPEpon_SetWanTimeoffset(unsigned char *time_offset_str)
+{
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
+    char timezone[20];
+    unsigned char *ptr;
+    ptr = time_offset_str + 1; //Ignore 1st char "@" (e.g. "@-18000")
+    int time_offset = atoi(ptr);
+
+    char dstValue[5];
+    GWPEpon_SysCfgGetStr("dst_adj", dstValue, sizeof(dstValue));
+    if (strcmp(dstValue, "On") == 0) 
+    {
+        GWPROVEPONLOG(INFO, "Applying timeoffset with DST:On\n");
+        time_offset += 3600; //DST adjustment
+        switch(time_offset) 
+        {
+            case -14400:
+                strcpy(timezone, "EST5EDT");
+            break;
+            case -18000:
+                strcpy(timezone, "CST6CDT");
+            break;
+            case -21600:
+                strcpy(timezone, "MST7MDT");
+            break;
+            case -25200:
+                strcpy(timezone, "PST8PDT");
+            break;
+            case -32400:
+                strcpy(timezone, "HST");
+            break;
+            default:
+                GWPROVEPONLOG(WARNING, "Invalid timezone, setting time zone to UTC\n");
+                strcpy(timezone, "UTC");
+            break;
+        }
+    }
+    else 
+    {
+        GWPROVEPONLOG(INFO, "Applying timeoffset with DST:Off\n");
+        switch(time_offset) 
+        {
+            case -18000:
+                strcpy(timezone, "EST5EDT");
+            break;
+            case -21600:
+                strcpy(timezone, "CST6CDT");
+            break;
+            case -25200:
+                strcpy(timezone, "MST7MDT");
+            break;
+            case -28800:
+                strcpy(timezone, "PST8PDT");
+            break;
+            case -36000:
+                strcpy(timezone, "HST");
+            break;
+            default:
+                GWPROVEPONLOG(WARNING, "Invalid timezone, setting time zone to UTC\n");
+                strcpy(timezone, "UTC");
+            break;
+        }
+    }
+    unsigned char cmdLine[50];
+    sprintf(cmdLine, "timedatectl set-timezone %s", timezone);
+    system(cmdLine);
     GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
 }
 
@@ -893,7 +1048,8 @@ static void *GWPEpon_sysevent_handler(void *data)
     async_id_t xconf_gw_prov_mode_asyncid;
     async_id_t bridge_mode_asyncid;
     async_id_t firewall_restart_asyncid;
-    async_id_t wan_timezone_asyncid;
+    async_id_t ipv4_timezone_asyncid;
+    async_id_t ipv6_timezone_asyncid;
     static unsigned char firstBoot=1;
 
     sysevent_set_options(sysevent_fd, sysevent_token, "epon_ifstatus", TUPLE_FLAG_EVENT);
@@ -952,8 +1108,12 @@ static void *GWPEpon_sysevent_handler(void *data)
     sysevent_set_options(sysevent_fd, sysevent_token, "firewall-restart", TUPLE_FLAG_EVENT);
     sysevent_setnotification(sysevent_fd, sysevent_token, "firewall-restart",  &firewall_restart_asyncid);
 
-    sysevent_set_options(sysevent_fd, sysevent_token, "wan_timezone", TUPLE_FLAG_EVENT);
-    sysevent_setnotification(sysevent_fd, sysevent_token, "wan_timezone",  &wan_timezone_asyncid);
+    sysevent_set_options(sysevent_fd, sysevent_token, "ipv4_timezone", TUPLE_FLAG_EVENT);
+    sysevent_setnotification(sysevent_fd, sysevent_token, "ipv4_timezone",  &ipv4_timezone_asyncid);
+
+    sysevent_set_options(sysevent_fd, sysevent_token, "ipv6_timezone", TUPLE_FLAG_EVENT);
+    sysevent_setnotification(sysevent_fd, sysevent_token, "ipv6_timezone",  &ipv6_timezone_asyncid);
+
    for (;;)
    {
         unsigned char name[25], val[42];
@@ -1027,9 +1187,11 @@ static void *GWPEpon_sysevent_handler(void *data)
             }		
             else if (strcmp(name, "ipv4-timeoffset")==0)
             {
+                GWPEpon_ProcessIpv4Timeoffset();
             }
             else if (strcmp(name, "ipv6-timeoffset")==0)
             {
+                GWPEpon_ProcessIpv6Timeoffset();
             }
             else if (strcmp(name, "dhcp_server-restart")==0)
             {
@@ -1111,9 +1273,13 @@ static void *GWPEpon_sysevent_handler(void *data)
             {
                 GWPEpon_ProcessFirewallRestart();
             }
-            else if (strcmp(name, "wan_timezone") == 0)
+            else if (strcmp(name, "ipv4_timezone") == 0)
             {
-                GWPEpon_ProcessWanTimezone();
+                GWPEpon_ProcessIpv4Timezone();
+            }
+            else if (strcmp(name, "ipv6_timezone") == 0)
+            {
+                GWPEpon_ProcessIpv6Timezone();
             }
             else
             {
