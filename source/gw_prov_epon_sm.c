@@ -643,6 +643,7 @@ static void GWPEpon_ProcessBridgeModeEnable()
 {
     GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
     system("sh /usr/ccsp/lan_handler.sh bridge_mode_enable");
+    system("systemctl restart dibbler.service");
     GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
 }
 
@@ -650,6 +651,7 @@ static void GWPEpon_ProcessBridgeModeDisable()
 {
     GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
     system("sh /usr/ccsp/lan_handler.sh bridge_mode_disable");
+    system("systemctl restart dibbler.service");
     GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
 }
 
@@ -1012,7 +1014,7 @@ static void *GWPEpon_sysevent_handler(void *data)
                 {
                     GWPEpon_ProcessIpv6Up();
                 }
-                else if (strcmp(val, "down")==0)
+                else
                 {
                     GWPEpon_ProcessIpv6Down();
                 }
