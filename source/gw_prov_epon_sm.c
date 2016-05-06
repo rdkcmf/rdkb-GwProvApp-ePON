@@ -75,7 +75,8 @@ static int GWPEpon_ProcessIpv4Down(void);
 static int GWPEpon_ProcessIpv6Down(void);
 static void GWPEpon_ProcessIpv4Timeoffset();
 static void GWPEpon_ProcessIpv6Timeoffset();
-static void GWPEpon_SetWanTimeoffset(unsigned char *time_offset_str);
+static void GWPEpon_SetWanTimeoffset(int time_offset);
+static int GWPEpon_hexToInt(char s[]);
 static int GWPEpon_SysCfgSetInt(const char *name, int int_value);
 static int GWPEpon_SysCfgGetInt(const char *name);
 static int GWPEpon_SysCfgGetStr(const char *name, unsigned char *out_value, int outbufsz);
@@ -712,6 +713,7 @@ static void GWPEpon_ProcessIpv4Timeoffset()
 {
     GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
 
+    int ipv4_time_offset;
     unsigned char value[20];
     int vallen = sizeof(value);
     value[0]='\0';
@@ -731,7 +733,8 @@ static void GWPEpon_ProcessIpv4Timeoffset()
             }
             else
             {
-                GWPEpon_SetWanTimeoffset(value);  
+                ipv4_time_offset = atoi(value + 1); //Ignore 1st char "@" (e.g. "@-18000")
+                GWPEpon_SetWanTimeoffset(ipv4_time_offset);  
             }
         }
         else 
@@ -751,6 +754,7 @@ static void GWPEpon_ProcessIpv6Timeoffset()
 {
     GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
 
+    int ipv6_time_offset;
     unsigned char value[20];
     int vallen = sizeof(value);	
     value[0]='\0';
@@ -758,14 +762,16 @@ static void GWPEpon_ProcessIpv6Timeoffset()
     if (GWPEpon_SyseventGetStr("ipv6_timezone", value, vallen) < 0)
     {
         value[0]='\0';
-        GWPROVEPONLOG(INFO, "Apply ipv6-timeoffset\n");   
+        GWPROVEPONLOG(INFO, "ipv6_timezone does not exists\n");   
         if (GWPEpon_SyseventGetStr("ipv6-timeoffset", value, vallen) < 0)
         {
             GWPROVEPONLOG(WARNING, "ipv6-timeoffset does not exists\n");
         }
         else 
         {
-            GWPEpon_SetWanTimeoffset(value);
+            ipv6_time_offset = GWPEpon_hexToInt(value); 
+            GWPROVEPONLOG(INFO, "Apply ipv6-timeoffset\n");   
+            GWPEpon_SetWanTimeoffset(ipv6_time_offset);
         }
     }
     else
@@ -774,14 +780,10 @@ static void GWPEpon_ProcessIpv6Timeoffset()
     GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
 }
 
-static void GWPEpon_SetWanTimeoffset(unsigned char *time_offset_str)
+static void GWPEpon_SetWanTimeoffset(int time_offset)
 {
     GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
     char timezone[20];
-    unsigned char *ptr;
-    ptr = time_offset_str + 1; //Ignore 1st char "@" (e.g. "@-18000")
-    int time_offset = atoi(ptr);
-
     char dstValue[5];
     GWPEpon_SysCfgGetStr("dst_adj", dstValue, sizeof(dstValue));
     if (strcmp(dstValue, "On") == 0) 
@@ -841,6 +843,40 @@ static void GWPEpon_SetWanTimeoffset(unsigned char *time_offset_str)
     sprintf(cmdLine, "timedatectl set-timezone %s", timezone);
     system(cmdLine);
     GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
+}
+
+static int GWPEpon_hexToInt(char s[])
+{
+    int hexdigit, i, num;
+    bool inputIsValid;
+    i=0;
+
+    if(s[i] == '0') {
+        ++i;
+        if(s[i] == 'x' || s[i] == 'X'){
+            ++i;
+        }
+    }
+
+    num = 0;
+    inputIsValid = true;
+    for(; inputIsValid == true; ++i) {
+        if(s[i] >= '0' && s[i] <= '9') {
+            hexdigit = s[i] - '0';
+        } else if(s[i] >= 'a' && s[i] <= 'f') {
+            hexdigit = s[i] - 'a' + 10;
+        } else if(s[i] >= 'A' && s[i] <= 'F') {
+            hexdigit = s[i] - 'A' + 10;
+        } else {
+            inputIsValid = false;
+        }
+
+        if(inputIsValid == true) {
+            num = 16 * num + hexdigit;
+        }
+    }
+
+    return num;
 }
 
 /**************************************************************************/
