@@ -780,6 +780,14 @@ static void GWPEpon_ProcessIpv6Timeoffset()
     GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
 }
 
+
+static void GWPEpon_ProcessLanRestart()
+{
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
+    system("sh /usr/ccsp/lan_handler.sh lan_restart");
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
+}
+
 static void GWPEpon_SetWanTimeoffset(int time_offset)
 {
     GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
@@ -1088,6 +1096,7 @@ static void *GWPEpon_sysevent_handler(void *data)
     async_id_t firewall_restart_asyncid;
     async_id_t ipv4_timezone_asyncid;
     async_id_t ipv6_timezone_asyncid;
+    async_id_t lan_restart_asyncid;
     static unsigned char firstBoot=1;
 
     sysevent_set_options(sysevent_fd, sysevent_token, "epon_ifstatus", TUPLE_FLAG_EVENT);
@@ -1151,6 +1160,9 @@ static void *GWPEpon_sysevent_handler(void *data)
 
     sysevent_set_options(sysevent_fd, sysevent_token, "ipv6_timezone", TUPLE_FLAG_EVENT);
     sysevent_setnotification(sysevent_fd, sysevent_token, "ipv6_timezone",  &ipv6_timezone_asyncid);
+
+    sysevent_set_options(sysevent_fd, sysevent_token, "lan-restart", TUPLE_FLAG_EVENT);
+    sysevent_setnotification(sysevent_fd, sysevent_token, "lan-restart",  &lan_restart_asyncid);
 
    for (;;)
    {
@@ -1318,6 +1330,13 @@ static void *GWPEpon_sysevent_handler(void *data)
             else if (strcmp(name, "ipv6_timezone") == 0)
             {
                 GWPEpon_ProcessIpv6Timezone();
+            }
+            else if (strcmp(name, "lan-restart") == 0)
+            {
+                if (strcmp(val, "1")==0)
+                {
+                    GWPEpon_ProcessLanRestart();
+                }
             }
             else
             {
