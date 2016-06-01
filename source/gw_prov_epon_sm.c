@@ -1131,6 +1131,7 @@ static void *GWPEpon_sysevent_handler(void *data)
     async_id_t ipv4_timezone_asyncid;
     async_id_t ipv6_timezone_asyncid;
     async_id_t lan_restart_asyncid;
+    async_id_t dhcpv6_server_asyncid;
     static unsigned char firstBoot=1;
 
     sysevent_set_options(sysevent_fd, sysevent_token, "epon_ifstatus", TUPLE_FLAG_EVENT);
@@ -1197,6 +1198,9 @@ static void *GWPEpon_sysevent_handler(void *data)
 
     sysevent_set_options(sysevent_fd, sysevent_token, "lan-restart", TUPLE_FLAG_EVENT);
     sysevent_setnotification(sysevent_fd, sysevent_token, "lan-restart",  &lan_restart_asyncid);
+
+    sysevent_set_options(sysevent_fd, sysevent_token, "dhcpv6s_server", TUPLE_FLAG_EVENT);
+    sysevent_setnotification(sysevent_fd, sysevent_token, "dhcpv6s_server",  &dhcpv6_server_asyncid);
 
    for (;;)
    {
@@ -1277,7 +1281,7 @@ static void *GWPEpon_sysevent_handler(void *data)
             {
                 GWPEpon_ProcessIpv6Timeoffset();
             }
-            else if (strcmp(name, "dhcp_server-restart")==0)
+            else if ( (strcmp(name, "dhcp_server-restart")==0) || (strcmp(name, "dhcpv6s_server")==0) )
             {
                 GWPEpon_ProcessDHCPStart();
             }
@@ -1344,13 +1348,13 @@ static void *GWPEpon_sysevent_handler(void *data)
             }
             else if (strcmp(name, "bridge_mode")==0)
             {
-                if (strcmp(val, "1")==0)
-                {
-                    GWPEpon_ProcessBridgeModeEnable();
-                }
-                else if (strcmp(val, "0")==0)
+                if (strcmp(val, "0")==0)
                 {
                     GWPEpon_ProcessBridgeModeDisable();
+                }
+                else
+                {
+                    GWPEpon_ProcessBridgeModeEnable();
                 }
             }
             else if (strcmp(name, "firewall-restart")==0)
