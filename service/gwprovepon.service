@@ -7,6 +7,7 @@ Type=forking
 PIDFile=/tmp/.gwprovepon.pid
 ExecStartPre=/bin/sh /usr/ccsp/utopia_init_mips.sh
 ExecStart=/usr/ccsp/gw_prov_epon
+ExecStartPost=/bin/sh /usr/ccsp/ins_conntrack.sh
 ExecStop=/bin/kill -HUP $(/bin/cat /tmp/gwprovepon.pid)
 ExecStop=/bin/rm /tmp/.gwprovepon.pid
 StandardOutput=syslog
