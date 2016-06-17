@@ -32,6 +32,7 @@
 #   limitations under the License.
 #######################################################################*/
 
+#ifndef _GW_PROV_EPON_SM_C_
 #define _GW_PROV_EPON_SM_C_
 
 /*! \file gw_prov_epon_sm.c
@@ -41,10 +42,6 @@
 /**************************************************************************/
 /*      INCLUDES:                                                         */
 /**************************************************************************/
-#ifdef FEATURE_SUPPORT_RDKLOG
-#undef FEATURE_SUPPORT_RDKLOG
-#endif
-
 #include <arpa/inet.h>
 #include <errno.h>
 #include <net/if.h>
@@ -64,7 +61,6 @@
 #include <pthread.h>
 #include "stdbool.h"
 #include "gw_prov_epon.h"
-#include "mso_mgmt_hal.h"
 
 /**************************************************************************/
 /*      LOCAL VARIABLES:                                                  */
@@ -82,12 +78,15 @@ static int erouter_reset_count;
 
 #ifdef FEATURE_SUPPORT_RDKLOG
 #include "ccsp_trace.h"
-const char compName[25]="LOG.RDK.GWEPON";
+const char compName[25]="LOG.RDK.GWPEPON";
 #define DEBUG_INI_NAME  "/etc/debug.ini"
 #define GWPROVEPONLOG(x, ...) { if((x)==(INFO)){CcspTraceInfo((__VA_ARGS__));}else if((x)==(WARNING)){CcspTraceWarning((__VA_ARGS__));}else if((x)==(ERROR)){CcspTraceError((__VA_ARGS__));} }
 #else
 #define GWPROVEPONLOG(x, ...) {fprintf(stderr, "GwProvEponLog<%s:%d> ", __FUNCTION__, __LINE__);fprintf(stderr, __VA_ARGS__);}
 #endif
+
+//Note: By Moving this headerfile inclusion to "INCLUDES:" block, may run into build issues
+#include "mso_mgmt_hal.h"
 
 #if 0
 #define IF_WANBRIDGE "erouter0"
@@ -1715,12 +1714,12 @@ int main(int argc, char *argv[])
     const int max_retries = 6;
     int retry = 0;
 
-    GWPROVEPONLOG(INFO, "Started gw_prov_epon\n")
-
 #ifdef FEATURE_SUPPORT_RDKLOG
     pComponentName = compName;
     rdk_logger_init(DEBUG_INI_NAME);
 #endif
+
+    GWPROVEPONLOG(INFO, "Started gw_prov_epon\n")
 
     daemonize();
 
@@ -1765,3 +1764,4 @@ int main(int argc, char *argv[])
     }
     return status;
 }
+#endif
