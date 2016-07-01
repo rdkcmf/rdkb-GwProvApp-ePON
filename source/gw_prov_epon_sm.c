@@ -742,6 +742,15 @@ GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
 GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
 }
 
+static void GWPEpon_ProcessGreRestart(char * val)
+{
+   char cmd[512];
+GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
+   sprintf(cmd, "sh /etc/utopia/service.d/service_xfinity_hotspot.sh xfinity-hotspot-restart");
+   system(cmd);
+GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
+}
+
 static void GWPEpon_ProcessIpv6Timezone()
 {
     GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
@@ -1174,6 +1183,9 @@ static void *GWPEpon_sysevent_handler(void *data)
     async_id_t dhcpv6_server_asyncid;
     async_id_t pnm_status_asyncid;
     async_id_t multinet_syncMembers_asyncid;
+    async_id_t gre_restart_asyncid;
+    async_id_t gre_forceRestart_asyncid;
+
     static unsigned char firstBoot=1;
 
     sysevent_set_options(sysevent_fd, sysevent_token, "epon_ifstatus", TUPLE_FLAG_EVENT);
@@ -1249,6 +1261,9 @@ static void *GWPEpon_sysevent_handler(void *data)
 
     sysevent_set_options(sysevent_fd, sysevent_token, "multinet-syncMembers", TUPLE_FLAG_EVENT);
     sysevent_setnotification(sysevent_fd, sysevent_token, "multinet-syncMembers",  &multinet_syncMembers_asyncid);
+
+    sysevent_setnotification(sysevent_fd, sysevent_token, "gre-restart",  &gre_restart_asyncid);
+    sysevent_setnotification(sysevent_fd, sysevent_token, "gre-forceRestart",  &gre_forceRestart_asyncid);
 
    for (;;)
    {
@@ -1408,6 +1423,10 @@ static void *GWPEpon_sysevent_handler(void *data)
             else if (strcmp(name, "firewall-restart")==0)
             {
                 GWPEpon_ProcessFirewallRestart();
+            }
+            else if (strcmp(name, "gre-restart")==0 || strcmp(name, "gre-forceRestart")==0)
+            {
+                GWPEpon_ProcessGreRestart(val);
             }
             else if (strcmp(name, "ipv4_timezone") == 0)
             {
