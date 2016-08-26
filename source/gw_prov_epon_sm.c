@@ -751,6 +751,28 @@ GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
 GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
 }
 
+static void GWPEpon_ProcessTSIP(char *name, char *val)
+{
+    char cmd[512];
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
+
+    sprintf(cmd, "sh /etc/utopia/service.d/service_ipv4.sh %s %s", name, val);
+    system(cmd);
+
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
+}
+
+static void GWPEpon_ProcessRIPD(char *name, char *val)
+{
+    char cmd[512];
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
+
+    sprintf(cmd, "sh /etc/utopia/service.d/service_routed.sh %s %s", name, val);
+    system(cmd);
+
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
+}
+
 static void GWPEpon_ProcessIpv6Timezone()
 {
     GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
@@ -1210,6 +1232,19 @@ static void *GWPEpon_sysevent_handler(void *data)
     async_id_t gre_restart_asyncid;
     async_id_t gre_forceRestart_asyncid;
 
+    /* TSIP event ids */
+    async_id_t tsip_sync_asyncid;
+    async_id_t tsip_stop_asyncid;
+    async_id_t tsip_resync_asyncid;
+    async_id_t tsip_resync_asn_asyncid;
+
+    /* RIPD/Zebra event ids */
+    async_id_t wan_status_asyncid;
+    async_id_t dhcpv6_option_changed_asyncid;
+    async_id_t ripd_restart_asyncid;
+    async_id_t zebra_restart_asyncid;
+    async_id_t staticroute_restart_asyncid;
+
     static unsigned char firstBoot=1;
 
     sysevent_set_options(sysevent_fd, sysevent_token, "epon_ifstatus", TUPLE_FLAG_EVENT);
@@ -1297,6 +1332,20 @@ static void *GWPEpon_sysevent_handler(void *data)
 
     sysevent_setnotification(sysevent_fd, sysevent_token, "gre-restart",  &gre_restart_asyncid);
     sysevent_setnotification(sysevent_fd, sysevent_token, "gre-forceRestart",  &gre_forceRestart_asyncid);
+
+    /* True Static IP events */
+    sysevent_setnotification(sysevent_fd, sysevent_token, "ipv4-sync_tsip_all",  &tsip_sync_asyncid);
+    sysevent_setnotification(sysevent_fd, sysevent_token, "ipv4-stop_tsip_all",  &tsip_stop_asyncid);
+    sysevent_setnotification(sysevent_fd, sysevent_token, "ipv4-resync_tsip",  &tsip_resync_asyncid);
+    sysevent_setnotification(sysevent_fd, sysevent_token, "ipv4-resync_tsip_asn",  &tsip_resync_asn_asyncid);
+
+    /* Route events to start ripd and zebra */
+    sysevent_setnotification(sysevent_fd, sysevent_token, "lan-status",  &lan_status_asyncid);
+    sysevent_setnotification(sysevent_fd, sysevent_token, "wan-status",  &wan_status_asyncid);
+    sysevent_setnotification(sysevent_fd, sysevent_token, "dhcpv6_option_changed",  &dhcpv6_option_changed_asyncid);
+    sysevent_setnotification(sysevent_fd, sysevent_token, "ripd-restart",  &ripd_restart_asyncid);
+    sysevent_setnotification(sysevent_fd, sysevent_token, "zebra-restart",  &zebra_restart_asyncid);
+    sysevent_setnotification(sysevent_fd, sysevent_token, "staticroute-restart",  &staticroute_restart_asyncid);
 
    for (;;)
    {
@@ -1505,6 +1554,24 @@ static void *GWPEpon_sysevent_handler(void *data)
              	{
                     GWPEpon_ProcessLanEth0ToLocalNetwork();
              	}
+            }
+            /* Process tsip events */
+            else if (strcmp(name, "ipv4-sync_tsip_all") == 0 ||
+                     strcmp(name, "ipv4-stop_tsip_all") == 0 ||
+                     strcmp(name, "ipv4-resync_tsip") == 0 ||
+                     strcmp(name, "ipv4-resync_tsip_asn") == 0)
+            {
+                 GWPEpon_ProcessTSIP(name, val);
+            }
+            /* Process RIPD/Zebra events */
+            else if (strcmp(name, "lan-status") == 0 ||
+                     strcmp(name, "wan-status") == 0 ||
+                     strcmp(name, "dhcpv6_option_changed") == 0 ||
+                     strcmp(name, "ripd-restart") == 0 ||
+                     strcmp(name, "zebra-restart") == 0 ||
+                     strcmp(name, "staticroute-restart") == 0)
+            {
+                GWPEpon_ProcessRIPD(name, val);
             }
             else
             {
