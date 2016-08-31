@@ -871,6 +871,27 @@ static void GWPEpon_ProcessLanRestart()
     GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
 }
 
+static void GWPEpon_ProcessLanStop()
+{
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
+    system("sh /usr/ccsp/lan_handler.sh lan_stop");
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
+}
+
+static void GWPEpon_ProcessLanStatus()
+{
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
+    system("sh /usr/ccsp/lan_handler.sh lan_status");
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
+}
+
+static void GWPEpon_ProcessForwardingRestart()
+{
+    GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
+    system("sh /usr/ccsp/lan_handler.sh forwarding_restart");
+    GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
+}
+
 static void GWPEpon_SetWanTimeoffset(int time_offset)
 {
     GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
@@ -1180,6 +1201,9 @@ static void *GWPEpon_sysevent_handler(void *data)
     async_id_t ipv4_timezone_asyncid;
     async_id_t ipv6_timezone_asyncid;
     async_id_t lan_restart_asyncid;
+    async_id_t lan_stop_asyncid;
+    async_id_t lan_status_asyncid;
+    async_id_t forwarding_restart_asyncid;
     async_id_t dhcpv6_server_asyncid;
     async_id_t pnm_status_asyncid;
     async_id_t multinet_syncMembers_asyncid;
@@ -1252,6 +1276,15 @@ static void *GWPEpon_sysevent_handler(void *data)
 
     sysevent_set_options(sysevent_fd, sysevent_token, "lan-restart", TUPLE_FLAG_EVENT);
     sysevent_setnotification(sysevent_fd, sysevent_token, "lan-restart",  &lan_restart_asyncid);
+
+    sysevent_set_options(sysevent_fd, sysevent_token, "lan-stop", TUPLE_FLAG_EVENT);
+    sysevent_setnotification(sysevent_fd, sysevent_token, "lan-stop",  &lan_stop_asyncid);
+
+    sysevent_set_options(sysevent_fd, sysevent_token, "lan-status", TUPLE_FLAG_EVENT);
+    sysevent_setnotification(sysevent_fd, sysevent_token, "lan-status",  &lan_status_asyncid);
+
+    sysevent_set_options(sysevent_fd, sysevent_token, "forwarding-restart", TUPLE_FLAG_EVENT);
+    sysevent_setnotification(sysevent_fd, sysevent_token, "forwarding-restart",  &forwarding_restart_asyncid);
 
     sysevent_set_options(sysevent_fd, sysevent_token, "dhcpv6s_server", TUPLE_FLAG_EVENT);
     sysevent_setnotification(sysevent_fd, sysevent_token, "dhcpv6s_server",  &dhcpv6_server_asyncid);
@@ -1442,6 +1475,18 @@ static void *GWPEpon_sysevent_handler(void *data)
                 {
                     GWPEpon_ProcessLanRestart();
                 }
+            }
+            else if (strcmp(name, "lan-stop") == 0)
+            {
+	        GWPEpon_ProcessLanStop();
+            }
+            else if (strcmp(name, "lan-status") == 0)
+            {
+	        GWPEpon_ProcessLanStatus();
+            }
+            else if (strcmp(name, "forwarding-restart") == 0)
+            {
+	        GWPEpon_ProcessForwardingRestart();
             }
             else if (strcmp(name, "pnm-status") == 0)
             {
