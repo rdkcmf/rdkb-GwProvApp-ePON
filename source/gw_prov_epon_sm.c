@@ -1,4 +1,4 @@
-/*
+/* 
  * If not stated otherwise in this file or this component's Licenses.txt file the
  * following copyright and licenses apply:
  *
@@ -796,14 +796,14 @@ static void GWPEpon_ProcessIpv4Timezone()
            strcpy(timezone_ascii, "UTC");
        }
        else {
-           for(i=0; sscanf((const char*)&timezone_hex[i], "%2x", &ch) == 1; i += 2)
+           for(i=0, j=0; sscanf((const char*)&timezone_hex[i], "%2x", &ch) == 1; i += 2)
            {
                timezone_ascii[j++] = ch; 
            }
            timezone_ascii[j] = 0;
        }
        unsigned char cmdLine[50];
-       sprintf(cmdLine, "timedatectl set-timezone %s", timezone_ascii);
+       sprintf(cmdLine, "timedatectl set-timezone UTC");    /* no offset */
        system(cmdLine);
     }
     else
@@ -811,6 +811,14 @@ static void GWPEpon_ProcessIpv4Timezone()
         GWPROVEPONLOG(INFO, "Ignore ipv4-timezone as ipv6-timezone or ipv6-timeoffset  exists\n");
     }
 
+    memset(timezone_hex, 0, vallen);
+    GWPEpon_SyseventGetStr("ipv4_timezone", timezone_hex, vallen-1);
+    if ( timezone_hex[0] )
+    {
+       unsigned char cmdLine[256];
+       sprintf(cmdLine, "dmcli eRT setv Device.Time.LocalTimeZone string %s", timezone_ascii);
+       system(cmdLine);
+    }
     GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
 }
 
@@ -973,8 +981,11 @@ static void GWPEpon_SetWanTimeoffset(int time_offset)
             break;
         }
     }
-    unsigned char cmdLine[50];
-    sprintf(cmdLine, "timedatectl set-timezone %s", timezone);
+    GWPEpon_SyseventSetStr("ipv4_timezone", timezone, 0);
+    unsigned char cmdLine[256];
+    sprintf(cmdLine, "dmcli eRT setv Device.Time.LocalTimeZone string %s", timezone);
+    system(cmdLine);
+    sprintf(cmdLine, "timedatectl set-timezone UTC");    /* no offset */
     system(cmdLine);
     GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
 }
