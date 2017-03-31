@@ -816,7 +816,7 @@ static void GWPEpon_ProcessIpv4Timezone()
     if ( timezone_hex[0] )
     {
        unsigned char cmdLine[256];
-       sprintf(cmdLine, "dmcli eRT setv Device.Time.LocalTimeZone string %s", timezone_ascii);
+       sprintf(cmdLine, "dmcli eRT setv Device.Time.LocalTimeZone string %s", timezone_hex);
        system(cmdLine);
     }
     GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
