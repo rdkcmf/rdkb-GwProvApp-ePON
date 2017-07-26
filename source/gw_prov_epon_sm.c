@@ -664,12 +664,16 @@ static int GWPEpon_ProcessXconfRouterIpMode()
     return 0;
 }
 
+#define RETURN_OK   0
 static int GWPEpon_ProcessXconfPoDSeed()
 {
     unsigned char out_val[45];
     GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
     GWPEpon_SysCfgGetStr("pod_seed", out_val, sizeof(out_val));
-    mso_set_pod_seed(out_val);
+    if ( mso_set_pod_seed(out_val) == RETURN_OK )
+    {
+        GWPEpon_SysCfgSetStr("pod_seed","");
+    }
     GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
     return 0;
 }
