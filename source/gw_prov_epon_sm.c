@@ -567,7 +567,7 @@ static int GWPEpon_ProcessLanEth0ToXHS()
 {
 
 	GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
-    system("sh /usr/ccsp/lan_handler.sh eth0_to_xhs");
+    system("sh /usr/ccsp/lan_handler.sh eth3_to_xhs");
 	GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
 	return 0;
 }
@@ -575,7 +575,7 @@ static int GWPEpon_ProcessLanEth0ToLocalNetwork()
 {
 
 	GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
-    system("sh /usr/ccsp/lan_handler.sh eth0_to_local");
+    system("sh /usr/ccsp/lan_handler.sh eth3_to_local");
 	GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
 	return 0;
 }
