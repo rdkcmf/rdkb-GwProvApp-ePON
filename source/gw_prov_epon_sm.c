@@ -1344,8 +1344,11 @@ static void *GWPEpon_sysevent_handler(void *data)
 
     sysevent_set_options(sysevent_fd, sysevent_token, "multinet-syncMembers", TUPLE_FLAG_EVENT);
     sysevent_setnotification(sysevent_fd, sysevent_token, "multinet-syncMembers",  &multinet_syncMembers_asyncid);
-
+    
+    sysevent_set_options(sysevent_fd, sysevent_token, "gre-restart", TUPLE_FLAG_EVENT);
     sysevent_setnotification(sysevent_fd, sysevent_token, "gre-restart",  &gre_restart_asyncid);
+    
+    sysevent_set_options(sysevent_fd, sysevent_token, "gre-forceRestart", TUPLE_FLAG_EVENT);
     sysevent_setnotification(sysevent_fd, sysevent_token, "gre-forceRestart",  &gre_forceRestart_asyncid);
 
     /* True Static IP events */
