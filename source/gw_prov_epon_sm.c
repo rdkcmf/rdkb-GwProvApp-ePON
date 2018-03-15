@@ -1352,17 +1352,27 @@ static void *GWPEpon_sysevent_handler(void *data)
     sysevent_setnotification(sysevent_fd, sysevent_token, "gre-forceRestart",  &gre_forceRestart_asyncid);
 
     /* True Static IP events */
+    sysevent_set_options    (sysevent_fd, sysevent_token, "ipv4-sync_tsip_all", TUPLE_FLAG_EVENT);
     sysevent_setnotification(sysevent_fd, sysevent_token, "ipv4-sync_tsip_all",  &tsip_sync_asyncid);
+    sysevent_set_options    (sysevent_fd, sysevent_token, "ipv4-stop_tsip_all", TUPLE_FLAG_EVENT);
     sysevent_setnotification(sysevent_fd, sysevent_token, "ipv4-stop_tsip_all",  &tsip_stop_asyncid);
+    sysevent_set_options    (sysevent_fd, sysevent_token, "ipv4-resync_tsip", TUPLE_FLAG_EVENT);
     sysevent_setnotification(sysevent_fd, sysevent_token, "ipv4-resync_tsip",  &tsip_resync_asyncid);
+    sysevent_set_options    (sysevent_fd, sysevent_token, "ipv4-resync_tsip_asn", TUPLE_FLAG_EVENT);
     sysevent_setnotification(sysevent_fd, sysevent_token, "ipv4-resync_tsip_asn",  &tsip_resync_asn_asyncid);
 
     /* Route events to start ripd and zebra */
+    sysevent_set_options    (sysevent_fd, sysevent_token, "lan-status", TUPLE_FLAG_EVENT);
     sysevent_setnotification(sysevent_fd, sysevent_token, "lan-status",  &lan_status_asyncid);
+    sysevent_set_options    (sysevent_fd, sysevent_token, "wan-status", TUPLE_FLAG_EVENT);
     sysevent_setnotification(sysevent_fd, sysevent_token, "wan-status",  &wan_status_asyncid);
+    sysevent_set_options    (sysevent_fd, sysevent_token, "dhcpv6_option_changed", TUPLE_FLAG_EVENT);
     sysevent_setnotification(sysevent_fd, sysevent_token, "dhcpv6_option_changed",  &dhcpv6_option_changed_asyncid);
+    sysevent_set_options    (sysevent_fd, sysevent_token, "ripd-restart", TUPLE_FLAG_EVENT);
     sysevent_setnotification(sysevent_fd, sysevent_token, "ripd-restart",  &ripd_restart_asyncid);
+    sysevent_set_options    (sysevent_fd, sysevent_token, "zebra-restart", TUPLE_FLAG_EVENT);
     sysevent_setnotification(sysevent_fd, sysevent_token, "zebra-restart",  &zebra_restart_asyncid);
+    sysevent_set_options    (sysevent_fd, sysevent_token, "staticroute-restart", TUPLE_FLAG_EVENT);
     sysevent_setnotification(sysevent_fd, sysevent_token, "staticroute-restart",  &staticroute_restart_asyncid);
 
    for (;;)
