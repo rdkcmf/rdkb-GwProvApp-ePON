@@ -1546,6 +1546,49 @@ static void *GWPEpon_sysevent_handler(void *data)
             {
                 GWPEpon_ProcessIpv6Timezone();
             }
+            else if ((strcmp(name, "lan-status") == 0 ||
+                     strcmp(name, "wan-status") == 0) &&
+                     strcmp(val, "started") == 0)
+            {
+                // When lan-status and wan-status started, only call functions when both are started
+                // or bad things will happen
+                do
+                {
+                    unsigned char lan_status[20];
+                    unsigned char wan_status[20];
+                    
+                    // Make sure lan-status is started first...
+                    lan_status[0] = '\0';
+                    if (GWPEpon_SyseventGetStr("lan-status", lan_status, sizeof(lan_status)) < 0)
+                    {
+                        break;
+                    }
+                    
+                    if (strcmp(lan_status, "started") != 0)
+                    {
+                        break;
+                    }
+                    
+                    // Make sure wan-status is started second...
+                    wan_status[0] = '\0';
+                    if (GWPEpon_SyseventGetStr("wan-status", wan_status, sizeof(wan_status)) < 0)
+                    {
+                        break;
+                    }
+                    
+                    if (strcmp(wan_status, "started") != 0)
+                    {
+                        break;
+                    }
+
+                    GWPEpon_ProcessRIPD("wan-status", "started");
+                } while (0);
+
+                if (strcmp(name, "lan-status") == 0)
+                {
+                     GWPEpon_ProcessLanStatus();
+                }
+            }
             else if (strcmp(name, "lan-restart") == 0)
             {
                 if (strcmp(val, "1")==0)
@@ -1556,10 +1599,6 @@ static void *GWPEpon_sysevent_handler(void *data)
             else if (strcmp(name, "lan-stop") == 0)
             {
 	        GWPEpon_ProcessLanStop();
-            }
-            else if (strcmp(name, "lan-status") == 0)
-            {
-	        GWPEpon_ProcessLanStatus();
             }
             else if (strcmp(name, "forwarding-restart") == 0)
             {
@@ -1600,6 +1639,10 @@ static void *GWPEpon_sysevent_handler(void *data)
                      strcmp(name, "staticroute-restart") == 0)
             {
                 GWPEpon_ProcessRIPD(name, val);
+                if (strcmp(name, "lan-status") == 0)
+                {
+                     GWPEpon_ProcessLanStatus();
+                }
             }
             else
             {
