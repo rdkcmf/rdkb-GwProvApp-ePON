@@ -1550,6 +1550,7 @@ static void *GWPEpon_sysevent_handler(void *data)
                      strcmp(name, "wan-status") == 0) &&
                      strcmp(val, "started") == 0)
             {
+                int restartFirewall = 0;
                 // When lan-status and wan-status started, only call functions when both are started
                 // or bad things will happen
                 do
@@ -1582,11 +1583,17 @@ static void *GWPEpon_sysevent_handler(void *data)
                     }
 
                     GWPEpon_ProcessRIPD("wan-status", "started");
+                    restartFirewall = 1;
                 } while (0);
 
                 if (strcmp(name, "lan-status") == 0)
                 {
                      GWPEpon_ProcessLanStatus();
+                }
+                
+                if (restartFirewall == 1)
+                {
+                    GWPEpon_ProcessFirewallRestart();
                 }
             }
             else if (strcmp(name, "lan-restart") == 0)
