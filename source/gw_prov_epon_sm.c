@@ -71,6 +71,7 @@ static int sysevent_fd_gs;
 static token_t sysevent_token_gs;
 static pthread_t sysevent_tid;
 static int erouter_reset_count;
+static time_t xconfGetSettings_call_time = 0;
 
 #define INFO  0
 #define WARNING  1
@@ -292,15 +293,25 @@ static int GWPEpon_XconfGetSettings(void)
     int outbufsz = sizeof(out_value);
     out_value[0] = '\0';
 
-    int retval = GWPEpon_SyseventGetStr("xconf_gs_status", out_value,outbufsz);
-    if(retval < 0)
+    // Make sure we don't call /usr/ccsp/xf3_xconfGetSettings.sh back to back which can cause some
+    // synchronization issues
+    if (xconfGetSettings_call_time != 0 && time(NULL) < (xconfGetSettings_call_time + 10))
     {
-        GWPROVEPONLOG(INFO, "%s Getting xconf configuration parameter\n",__FUNCTION__);
-        system("sh /usr/ccsp/xf3_xconfGetSettings.sh &");
+        GWPROVEPONLOG(INFO, "%s Not getting xconf configuration parameter due to another running\n",__FUNCTION__);
     }
     else
     {
-        GWPROVEPONLOG(INFO, "%s xconf_gs_status=%s\n",__FUNCTION__,out_value);
+        int retval = GWPEpon_SyseventGetStr("xconf_gs_status", out_value,outbufsz);
+        if(retval < 0)
+        {
+            GWPROVEPONLOG(INFO, "%s Getting xconf configuration parameter\n",__FUNCTION__);
+            system("sh /usr/ccsp/xf3_xconfGetSettings.sh &");
+            xconfGetSettings_call_time = time(NULL);
+        }
+        else
+        {
+            GWPROVEPONLOG(INFO, "%s xconf_gs_status=%s\n",__FUNCTION__,out_value);
+        }
     }
 	
     GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
@@ -674,6 +685,7 @@ static int GWPEpon_ProcessXconfPoDSeed()
     {
         GWPEpon_SysCfgSetStr("pod_seed","");
     }
+    xconfGetSettings_call_time = 0;
     GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
     return 0;
 }
