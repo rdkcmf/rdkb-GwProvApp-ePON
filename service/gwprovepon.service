@@ -18,7 +18,8 @@
 ##########################################################################
 [Unit]
 Description=epon gwprovision service
-After=rg_network.service
+ConditionPathExists=/nvram/secure
+After=rg_network.service securemount.service
 
 [Service]
 Type=forking
