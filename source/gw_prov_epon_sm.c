@@ -1426,6 +1426,7 @@ static void *GWPEpon_sysevent_handler(void *data)
                 else if (strcmp(val, "down")==0)
                 {
                     GWPEpon_ProcessIfDown();
+		    GWPEpon_SyseventSetStr("wan-status", "stopped", sizeof("stopped"));      //XF3-5230
                 }
             }
             else if (strcmp(name, "ipv4-status")==0)
