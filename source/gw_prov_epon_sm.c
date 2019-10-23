@@ -596,6 +596,7 @@ static int GWPEpon_ProcessPNM_Status()
 	char buffer[512]={0};
 	char *str = NULL;
 	GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
+    system("sh /usr/ccsp/lan_handler.sh init");
     system("dmcli eRT getv Device.Bridging.Bridge.2.Port.2.Enable >> /tmp/XHSport.txt");//XHS port true or false?
 	fp = fopen("/tmp/XHSport.txt","r");
     if (fp != NULL)
@@ -1351,7 +1352,7 @@ static void *GWPEpon_sysevent_handler(void *data)
     sysevent_set_options(sysevent_fd, sysevent_token, "dhcpv6s_server", TUPLE_FLAG_EVENT);
     sysevent_setnotification(sysevent_fd, sysevent_token, "dhcpv6s_server",  &dhcpv6_server_asyncid);
 
-    sysevent_set_options(sysevent_fd, sysevent_token, "pnm-status", TUPLE_FLAG_EVENT);
+    //sysevent_set_options(sysevent_fd, sysevent_token, "pnm-status", TUPLE_FLAG_EVENT);
     sysevent_setnotification(sysevent_fd, sysevent_token, "pnm-status",&pnm_status_asyncid);
 
     sysevent_set_options(sysevent_fd, sysevent_token, "multinet-syncMembers", TUPLE_FLAG_EVENT);
@@ -1401,6 +1402,9 @@ static void *GWPEpon_sysevent_handler(void *data)
            strcpy(name,"epon_ifstatus");
            err = GWPEpon_SyseventGetStr(name, val, vallen);
            firstBoot = 0;
+
+           if (strcmp(val, "down")==0)
+	 	continue;
         }
         else
            err = sysevent_getnotification(sysevent_fd, sysevent_token, name, &namelen,  val, &vallen, &getnotification_asyncid);
