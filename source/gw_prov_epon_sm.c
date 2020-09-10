@@ -55,7 +55,6 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
-#include <ruli.h>
 #include <sysevent/sysevent.h>
 #include <syscfg/syscfg.h>
 #include <pthread.h>

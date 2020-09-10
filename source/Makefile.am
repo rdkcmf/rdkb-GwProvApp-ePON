@@ -28,7 +28,7 @@ AM_CPPFLAGS = -Wall -Werror
 ACLOCAL_AMFLAGS = -I m4
 hardware_platform = i686-linux-gnu
 bin_PROGRAMS = gw_prov_epon
-gw_prov_epon_CPPFLAGS = -I/var/tmp/pc-rdkb/include $(CPPFLAGS) -I$(srcdir)/include -I$(top_srcdir)/../hal/include -I${PKG_CONFIG_SYSROOT_DIR}/$(includedir)/ruli/
+gw_prov_epon_CPPFLAGS = -I/var/tmp/pc-rdkb/include $(CPPFLAGS) -I$(srcdir)/include -I$(top_srcdir)/../hal/include
 gw_prov_epon_SOURCES = gw_prov_epon_sm.c
 gw_prov_epon_LDFLAGS = -lsysevent -lsyscfg -lhal_msomgmt -lccsp_common -lsecure_wrapper
 
