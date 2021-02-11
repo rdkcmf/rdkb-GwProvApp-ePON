@@ -61,6 +61,7 @@
 #include <pthread.h>
 #include "stdbool.h"
 #include "gw_prov_epon.h"
+#include "secure_wrapper.h"
 
 /**************************************************************************/
 /*      LOCAL VARIABLES:                                                  */
@@ -761,31 +762,25 @@ GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
 
 static void GWPEpon_ProcessGreRestart(char * val)
 {
-   char cmd[512];
 GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
-   sprintf(cmd, "sh /etc/utopia/service.d/service_xfinity_hotspot.sh xfinity-hotspot-restart");
-   system(cmd);
+   v_secure_system("sh /etc/utopia/service.d/service_xfinity_hotspot.sh xfinity-hotspot-restart");
 GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
 }
 
 static void GWPEpon_ProcessTSIP(char *name, char *val)
 {
-    char cmd[512];
     GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
 
-    sprintf(cmd, "sh /etc/utopia/service.d/service_ipv4.sh %s %s", name, val);
-    system(cmd);
+    v_secure_system("sh /etc/utopia/service.d/service_ipv4.sh %s %s", name, val);
 
     GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
 }
 
 static void GWPEpon_ProcessRIPD(char *name, char *val)
 {
-    char cmd[512];
     GWPROVEPONLOG(INFO, "Entering into %s\n",__FUNCTION__);
 
-    sprintf(cmd, "sh /etc/utopia/service.d/service_routed.sh %s %s", name, val);
-    system(cmd);
+    v_secure_system("sh /etc/utopia/service.d/service_routed.sh %s %s", name, val);
 
     GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
 }
@@ -819,9 +814,7 @@ static void GWPEpon_ProcessIpv4Timezone()
            }
            timezone_ascii[j] = 0;
        }
-       unsigned char cmdLine[50];
-       sprintf(cmdLine, "timedatectl set-timezone UTC");    /* no offset */
-       system(cmdLine);
+       v_secure_system("timedatectl set-timezone UTC");    /* no offset */
     }
     else
     {
@@ -832,9 +825,7 @@ static void GWPEpon_ProcessIpv4Timezone()
     GWPEpon_SyseventGetStr("ipv4_timezone", timezone_hex, vallen-1);
     if ( timezone_hex[0] )
     {
-       unsigned char cmdLine[256];
-       sprintf(cmdLine, "dmcli eRT setv Device.Time.LocalTimeZone string %s", timezone_hex);
-       system(cmdLine);
+       v_secure_system("dmcli eRT setv Device.Time.LocalTimeZone string %s", timezone_hex);
     }
     GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
 }
@@ -999,11 +990,8 @@ static void GWPEpon_SetWanTimeoffset(int time_offset)
         }
     }
     GWPEpon_SyseventSetStr("ipv4_timezone", timezone, 0);
-    unsigned char cmdLine[256];
-    sprintf(cmdLine, "dmcli eRT setv Device.Time.LocalTimeZone string %s", timezone);
-    system(cmdLine);
-    sprintf(cmdLine, "timedatectl set-timezone UTC");    /* no offset */
-    system(cmdLine);
+    v_secure_system("dmcli eRT setv Device.Time.LocalTimeZone string %s", timezone);
+    v_secure_system("timedatectl set-timezone UTC");    /* no offset */
     GWPROVEPONLOG(INFO, "Exiting from %s\n",__FUNCTION__);
 }
 
