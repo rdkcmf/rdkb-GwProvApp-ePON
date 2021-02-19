@@ -29,6 +29,7 @@ ExecStart=/usr/ccsp/gw_prov_epon
 ExecStartPost=/bin/sh /usr/ccsp/ins_conntrack.sh
 ExecStop=/bin/kill -HUP $(/bin/cat /tmp/gwprovepon.pid)
 ExecStop=/bin/rm /tmp/.gwprovepon.pid
+ExecStopPost=/bin/sh -c 'echo 0 >> /tmp/GWPROV_Restarted'
 StandardOutput=syslog
 
 [Install]
