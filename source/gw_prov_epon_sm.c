@@ -1374,7 +1374,7 @@ static void *GWPEpon_sysevent_handler(void *data)
     sysevent_setnotification(sysevent_fd, sysevent_token, "zebra-restart",  &zebra_restart_asyncid);
     sysevent_set_options    (sysevent_fd, sysevent_token, "staticroute-restart", TUPLE_FLAG_EVENT);
     sysevent_setnotification(sysevent_fd, sysevent_token, "staticroute-restart",  &staticroute_restart_asyncid);
-
+    sysevent_set(sysevent_fd, sysevent_token, "gw_prov-status", "up", 0);
    for (;;)
    {
         unsigned char name[25], val[42];
